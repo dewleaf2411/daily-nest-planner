@@ -323,7 +323,7 @@ function DailyNest() {
     <main className="min-h-screen w-full px-4 py-10 sm:py-16">
       <div className="mx-auto w-full max-w-[860px]">
         <header className="mb-8 sm:mb-10">
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">DailyNest MVP</h1>
+          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">Planner</h1>
           <p className="mt-2 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
           </p>
