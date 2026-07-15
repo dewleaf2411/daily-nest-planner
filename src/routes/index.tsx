@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
+import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 
@@ -10,10 +11,12 @@ export const Route = createFileRoute("/")({
   component: DailyNest,
 });
 
-const PLACEHOLDER = `pay rent due soon
-call dentist
-submit form Friday
-buy snacks tomorrow`;
+const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
+
+Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
+
+type InputMode = "type" | "voice";
+
 
 function hhmmToMinutes(s: string): number {
   const [h, m] = s.split(":").map((n) => parseInt(n, 10));
