@@ -7,7 +7,7 @@ import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/plan")({
   component: DailyNest,
 });
 
