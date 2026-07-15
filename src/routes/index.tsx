@@ -320,50 +320,87 @@ function DailyNest() {
   const cutoffLabel = minutesToTimeLabel(cutoffMinutes);
 
   return (
-    <main className="min-h-screen w-full px-4 py-10 sm:py-16">
-      <div className="mx-auto w-full max-w-[860px]">
+    <main className="relative min-h-screen w-full overflow-hidden px-4 py-10 sm:py-16">
+      {/* soft decorative leaves */}
+      <div aria-hidden className="pointer-events-none absolute -left-16 top-24 hidden md:block opacity-40">
+        <Leaf className="h-72 w-72 text-primary/20 -rotate-12" strokeWidth={0.6} />
+      </div>
+      <div aria-hidden className="pointer-events-none absolute -right-16 top-10 hidden md:block opacity-30">
+        <Leaf className="h-64 w-64 text-primary/20 rotate-45" strokeWidth={0.6} />
+      </div>
+
+      <div className="relative mx-auto w-full max-w-[860px]">
         <header className="mb-8 sm:mb-10">
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">Planner</h1>
-          <p className="mt-2 text-sm sm:text-base text-muted-foreground">
+          <div className="flex items-center gap-4">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+              <Leaf className="h-6 w-6" strokeWidth={1.5} />
+            </div>
+            <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
+          </div>
+          <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
+          </p>
+          <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Heart className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
+            You don't have to do it all. We'll help you focus on what matters.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_-12px_rgba(30,60,45,0.12)] p-5 sm:p-8">
+        <section className="rounded-2xl border border-border bg-card/90 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.03),0_20px_50px_-24px_rgba(30,60,45,0.18)] p-6 sm:p-8">
           <form onSubmit={onSubmit}>
-            <label htmlFor="tasks" className="block text-sm font-medium text-foreground">
-              Tasks and worries
-            </label>
-            <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
+                <FileText className="h-5 w-5" strokeWidth={1.6} />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
+                  Tasks and worries
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+              </div>
+            </div>
             <textarea
               id="tasks"
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
               rows={8}
-              className="mt-3 w-full resize-y rounded-lg border border-input bg-background px-3.5 py-3 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+              className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            <div className="mt-5 flex flex-col sm:flex-row sm:items-end gap-4">
-              <div className="flex-1">
-                <label htmlFor="until" className="block text-sm font-medium text-foreground">
+            <div className="my-6 h-px bg-border/70" />
+
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
+                <Clock className="h-5 w-5" strokeWidth={1.6} />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="until" className="block font-serif text-2xl font-normal text-foreground leading-tight">
                   Available until
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">We won't schedule tasks after this time.</p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="relative w-full sm:w-56">
+                <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
                 <input
                   id="until"
                   type="time"
                   value={availableUntil}
                   onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="mt-2 w-full sm:w-40 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+                  className="w-full rounded-xl border border-input bg-background/70 pl-9 pr-9 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
                 />
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="inline-flex items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-70 disabled:cursor-not-allowed"
+                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {loading ? "Making plan…" : "Make My Plan"}
+                {!loading && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={1.8} />}
               </button>
             </div>
 
