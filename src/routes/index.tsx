@@ -721,10 +721,16 @@ function DailyNest() {
                 </div>
               )}
 
-              <p className="mt-8 text-xs text-muted-foreground">Available until: {cutoffLabel}</p>
             </div>
           )}
         </section>
+
+        <p className="mt-6 flex items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+          <Sprout className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
+          {items && !loading
+            ? "You're building a great rhythm. Keep going."
+            : "We'll build a plan that feels doable and kind to you."}
+        </p>
       </div>
 
       {crowded && items && (
