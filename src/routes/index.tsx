@@ -135,16 +135,16 @@ function DailyNest() {
     e.preventDefault();
     setError(null);
     setStatus(null);
-    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
-      setError("Add one task or worry per line, then make your plan.");
+    const brainDump = raw.trim();
+    if (!brainDump) {
+      setError("Type or record what's on your mind, then make your plan.");
       return;
     }
     setLoading(true);
     try {
       const res = await plan({
         data: {
-          tasks: lines,
+          brainDump,
           nowIso: new Date().toISOString(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           availableUntil,
@@ -160,6 +160,88 @@ function DailyNest() {
       setLoading(false);
     }
   }, [raw, availableUntil, plan]);
+
+  const pickMimeType = (): string => {
+    if (typeof MediaRecorder === "undefined") return "";
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
+    for (const c of candidates) {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return "";
+  };
+
+  const startRecording = useCallback(async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = pickMimeType();
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
+        const type = recorder.mimeType || mime || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type });
+        audioChunksRef.current = [];
+        if (blob.size < 1200) {
+          setError("That recording was too short — try again and speak for a few seconds.");
+          return;
+        }
+        setTranscribing(true);
+        try {
+          const buf = await blob.arrayBuffer();
+          // base64 encode
+          let binary = "";
+          const bytes = new Uint8Array(buf);
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+          }
+          const audioBase64 = btoa(binary);
+          const res = await transcribe({ data: { audioBase64, mimeType: type } });
+          const text = res.text.trim();
+          if (!text) {
+            setError("I couldn't hear anything in that recording. Try again?");
+          } else {
+            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
+            flashStatus("Added your voice note.");
+          }
+        } catch (err) {
+          console.error(err);
+          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      setRecSeconds(0);
+      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    } catch (err) {
+      console.error(err);
+      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
+    }
+  }, [transcribe]);
+
+  const stopRecording = useCallback(() => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
+    mediaRecorderRef.current = null;
+    setRecording(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (recTimerRef.current) clearInterval(recTimerRef.current);
+      const rec = mediaRecorderRef.current;
+      if (rec && rec.state !== "inactive") rec.stop();
+    };
+  }, []);
+
 
   const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
     setItems((prev) => (prev ? updater(prev) : prev));
