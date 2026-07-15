@@ -594,14 +594,14 @@ function DailyNest() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {item && !isEditing && (
+                            {item && (
                               <button
                                 type="button"
-                                onClick={() => startEdit(item.originalIndex)}
+                                onClick={() => (isEditing ? (setEditingIdx(null), setEditForm(null)) : startEdit(item.originalIndex))}
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                                aria-label={`Edit ${entry.title}`}
+                                aria-label={isEditing ? "Collapse editor" : `Edit ${entry.title}`}
                               >
-                                <Pencil className="h-3.5 w-3.5" /> Edit
+                                {isEditing ? (<><ChevronUp className="h-3.5 w-3.5" /> Collapse</>) : (<><Pencil className="h-3.5 w-3.5" /> Edit</>)}
                               </button>
                             )}
                             {isFlexible && (
