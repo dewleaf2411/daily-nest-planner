@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
+import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 
@@ -10,10 +11,12 @@ export const Route = createFileRoute("/")({
   component: DailyNest,
 });
 
-const PLACEHOLDER = `pay rent due soon
-call dentist
-submit form Friday
-buy snacks tomorrow`;
+const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
+
+Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
+
+type InputMode = "type" | "voice";
+
 
 function hhmmToMinutes(s: string): number {
   const [h, m] = s.split(":").map((n) => parseInt(n, 10));
@@ -82,6 +85,13 @@ interface CrowdedProposal {
 
 function DailyNest() {
   const [raw, setRaw] = useState("");
+  const [mode, setMode] = useState<InputMode>("type");
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +105,8 @@ function DailyNest() {
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
+  const transcribe = useServerFn(transcribeAudio);
+
 
   const nowMinutes = useMemo(() => {
     const d = new Date();
@@ -123,16 +135,16 @@ function DailyNest() {
     e.preventDefault();
     setError(null);
     setStatus(null);
-    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
-      setError("Add one task or worry per line, then make your plan.");
+    const brainDump = raw.trim();
+    if (!brainDump) {
+      setError("Type or record what's on your mind, then make your plan.");
       return;
     }
     setLoading(true);
     try {
       const res = await plan({
         data: {
-          tasks: lines,
+          brainDump,
           nowIso: new Date().toISOString(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           availableUntil,
@@ -148,6 +160,88 @@ function DailyNest() {
       setLoading(false);
     }
   }, [raw, availableUntil, plan]);
+
+  const pickMimeType = (): string => {
+    if (typeof MediaRecorder === "undefined") return "";
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
+    for (const c of candidates) {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return "";
+  };
+
+  const startRecording = useCallback(async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = pickMimeType();
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
+        const type = recorder.mimeType || mime || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type });
+        audioChunksRef.current = [];
+        if (blob.size < 1200) {
+          setError("That recording was too short — try again and speak for a few seconds.");
+          return;
+        }
+        setTranscribing(true);
+        try {
+          const buf = await blob.arrayBuffer();
+          // base64 encode
+          let binary = "";
+          const bytes = new Uint8Array(buf);
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+          }
+          const audioBase64 = btoa(binary);
+          const res = await transcribe({ data: { audioBase64, mimeType: type } });
+          const text = res.text.trim();
+          if (!text) {
+            setError("I couldn't hear anything in that recording. Try again?");
+          } else {
+            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
+            flashStatus("Added your voice note.");
+          }
+        } catch (err) {
+          console.error(err);
+          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      setRecSeconds(0);
+      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    } catch (err) {
+      console.error(err);
+      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
+    }
+  }, [transcribe]);
+
+  const stopRecording = useCallback(() => {
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
+    mediaRecorderRef.current = null;
+    setRecording(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (recTimerRef.current) clearInterval(recTimerRef.current);
+      const rec = mediaRecorderRef.current;
+      if (rec && rec.state !== "inactive") rec.stop();
+    };
+  }, []);
+
 
   const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
     setItems((prev) => (prev ? updater(prev) : prev));
@@ -352,21 +446,68 @@ function DailyNest() {
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
                 <FileText className="h-5 w-5" strokeWidth={1.6} />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  Tasks and worries
+                  What's on your mind?
                 </label>
-                <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
+              </div>
+              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "type"}
+                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "voice"}
+                  onClick={() => setMode("voice")}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
+                </button>
               </div>
             </div>
+
             <textarea
               id="tasks"
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
-              rows={8}
+              rows={mode === "voice" ? 5 : 8}
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
+
+            {mode === "voice" && (
+              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
+                <button
+                  type="button"
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={transcribing}
+                  aria-label={recording ? "Stop recording" : "Start recording"}
+                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
+                    recording
+                      ? "bg-priority-high text-priority-high-fg animate-pulse"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  }`}
+                >
+                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  {transcribing
+                    ? "Transcribing your voice note…"
+                    : recording
+                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
+                      : "Tap the mic and just talk. We'll add it to your notes above."}
+                </p>
+              </div>
+            )}
+
 
             <div className="my-6 h-px bg-border/70" />
 

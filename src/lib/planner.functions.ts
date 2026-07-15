@@ -5,37 +5,38 @@ import { createLovableAiGatewayProvider } from "./ai-gateway.server";
 import type { PlanItem } from "./planner.types";
 
 const InputSchema = z.object({
-  tasks: z.array(z.string()).min(1),
+  brainDump: z.string().min(1),
   nowIso: z.string(),
   timezone: z.string(),
   availableUntil: z.string(), // "HH:MM"
 });
 
-const SYSTEM = `You are DailyNest, a calm and realistic AI day planner. You turn each raw user line (task, worry, commitment, reminder) into ONE structured planning item.
+const SYSTEM = `You are Planner, a calm and realistic AI day planner. The user will paste a stream of consciousness — a rant, a mix of thoughts, worries, reminders, and commitments. Your job is to READ BETWEEN THE LINES and pull out ONLY the concrete, actionable items worth doing today or tomorrow.
 
-For every input line return JSON with these keys:
-- originalIndex (number, 0-based, must match input order)
-- title (short, action-oriented)
-- durationMinutes (integer, realistic estimate)
+Rules for what to extract:
+- Ignore pure venting or emotional context that has no action ("I'm so tired", "ugh Mondays").
+- Convert vague worries into ONE tiny concrete action ("I'm anxious about rent" -> "Pay rent").
+- Deduplicate — if the user mentions the same thing twice, return one item.
+- Detect fixed commitments (class at 10, meeting 3pm, appointment).
+- Detect deadlines from words like "Friday", "tomorrow", "today", "due", "by", specific dates.
+- Prioritize by consequence: overdue/due-today/essential = high; nice-to-have = low.
+- Long deep-work (study, write, project) => set focusBlockMinutes to 25/30/45.
+
+Return a JSON array. Each item has:
+- originalIndex (0-based, in the order you return them)
+- title (short, action-oriented, imperative)
+- durationMinutes (realistic integer)
 - priority ("high" | "medium" | "low")
-- reason (one sentence)
-- dueDate (ISO date "YYYY-MM-DD" or null)
+- reason (one short sentence — why this made the cut)
+- dueDate (ISO "YYYY-MM-DD" or null)
 - dueLabel ("Overdue" | "Due today" | "Due tomorrow" | "Due in N days" | null)
 - dueCategory ("overdue" | "today" | "tomorrow" | "future" | "none")
 - suggestedDay ("today" | "tomorrow")
-- isFixed (true if user gave an exact time like "3pm meeting", "class at 10:00")
+- isFixed (true if an explicit clock time is stated)
 - fixedStart ("HH:MM" 24h or null)
 - fixedEnd ("HH:MM" or null)
-- focusBlockMinutes (25, 30, or 45 for long deep-work tasks; else null)
-- note (short overflow/fit hint, or null)
-
-Rules:
-- Detect deadlines from words like "Friday", "tomorrow", "today", "due", "by", specific dates.
-- Fixed commitments: classes, appointments, work shifts, rehearsals, or anything with an explicit clock time.
-- High priority: overdue, due today, essential, high-consequence.
-- Long deep-work (study, write, project) => set focusBlockMinutes to 25/30/45.
-- Short tasks (< 45 min) => focusBlockMinutes null.
-- Worries without action => convert to a small actionable step.
+- focusBlockMinutes (25 | 30 | 45 | null)
+- note (short hint or null)
 
 Return ONLY a JSON array. No prose, no markdown fences.`;
 
@@ -58,12 +59,23 @@ function friendlyLabel(dueDate: string | null | undefined, todayIso: string): { 
   return { label: `Due in ${diff} days`, cat: "future" };
 }
 
-function deterministicFallback(tasks: string[], nowIso: string): PlanItem[] {
+// Very rough heuristic splitter used when no AI key is available.
+function splitBrainDump(text: string): string[] {
+  const chunks = text
+    .split(/[\n\.;]+|,\s+and\s+|,\s+then\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Drop obvious venting-only lines
+  const venty = /^(i(?:'m| am)?\s+(so\s+)?(tired|stressed|anxious|overwhelmed|exhausted|sad|angry|ugh)|ugh|argh|fml|why|help|idk)\b/i;
+  return chunks.filter((c) => c.split(/\s+/).length >= 2 && !venty.test(c));
+}
+
+function deterministicFallback(brainDump: string, nowIso: string): PlanItem[] {
   const todayIso = nowIso.slice(0, 10);
+  const tasks = splitBrainDump(brainDump);
   return tasks.map((raw, i) => {
     const line = raw.trim();
     const lower = line.toLowerCase();
-    // fixed-time detection
     const timeMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
     const hasTimeWord = /\bat\s+\d/.test(lower) || /\b(class|meeting|appointment|call at|shift|rehearsal)\b/.test(lower);
     let isFixed = false;
@@ -83,7 +95,6 @@ function deterministicFallback(tasks: string[], nowIso: string): PlanItem[] {
       }
     }
 
-    // due detection
     let dueDate: string | null = null;
     if (/\btoday\b/.test(lower)) dueDate = todayIso;
     else if (/\btomorrow\b/.test(lower)) {
@@ -103,12 +114,10 @@ function deterministicFallback(tasks: string[], nowIso: string): PlanItem[] {
       dueDate = todayIso;
     }
 
-    // priority
     let priority: PlanItem["priority"] = "medium";
     if (/\b(rent|bill|urgent|asap|due soon|overdue)\b/.test(lower) || (dueDate && daysBetween(todayIso, dueDate) <= 0)) priority = "high";
     else if (/\b(snack|buy|maybe|someday|later)\b/.test(lower)) priority = "low";
 
-    // duration
     let duration = 20;
     if (/\b(study|write|essay|project|read|design|code|prepare|research)\b/.test(lower)) duration = 90;
     else if (/\b(call|email|text|message)\b/.test(lower)) duration = 15;
@@ -119,10 +128,6 @@ function deterministicFallback(tasks: string[], nowIso: string): PlanItem[] {
     const focusBlockMinutes = duration >= 60 && !isFixed ? 30 : null;
     const { label, cat } = friendlyLabel(dueDate, todayIso);
 
-    const suggestedDay: PlanItem["suggestedDay"] =
-      cat === "overdue" || cat === "today" || priority === "high" ? "today" : "today";
-
-    // Clean title
     const title = line.replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(am|pm)?/i, "").replace(/\s+/g, " ").trim();
 
     return {
@@ -134,7 +139,7 @@ function deterministicFallback(tasks: string[], nowIso: string): PlanItem[] {
       dueDate,
       dueLabel: label,
       dueCategory: cat,
-      suggestedDay,
+      suggestedDay: "today",
       isFixed,
       fixedStart,
       fixedEnd,
@@ -151,7 +156,7 @@ export const planTasks = createServerFn({ method: "POST" })
     const todayIso = data.nowIso.slice(0, 10);
 
     if (!key) {
-      return { items: deterministicFallback(data.tasks, data.nowIso), usedFallback: true };
+      return { items: deterministicFallback(data.brainDump, data.nowIso), usedFallback: true };
     }
 
     try {
@@ -160,8 +165,10 @@ export const planTasks = createServerFn({ method: "POST" })
 Timezone: ${data.timezone}
 Available until (today): ${data.availableUntil}
 
-Input lines (one item per line, 0-indexed):
-${data.tasks.map((t, i) => `${i}: ${t}`).join("\n")}
+User brain dump (may include venting, ignore it — extract only real actions):
+"""
+${data.brainDump}
+"""
 
 Return the JSON array now.`;
 
@@ -173,14 +180,13 @@ Return the JSON array now.`;
 
       const cleaned = stripFences(text);
       const parsed = JSON.parse(cleaned) as PlanItem[];
-      // Recompute due labels using today's date to keep them fresh
-      const normalized = parsed.map((p) => {
+      const normalized = parsed.map((p, i) => {
         const { label, cat } = friendlyLabel(p.dueDate ?? null, todayIso);
-        return { ...p, dueLabel: label ?? p.dueLabel ?? null, dueCategory: cat };
+        return { ...p, originalIndex: i, dueLabel: label ?? p.dueLabel ?? null, dueCategory: cat };
       });
       return { items: normalized, usedFallback: false };
     } catch (err) {
       console.error("AI planning failed, using fallback:", err);
-      return { items: deterministicFallback(data.tasks, data.nowIso), usedFallback: true };
+      return { items: deterministicFallback(data.brainDump, data.nowIso), usedFallback: true };
     }
   });
