@@ -417,15 +417,27 @@ function DailyNest() {
           )}
 
           {items && !loading && (
-            <div className="mt-10">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-lg font-semibold text-foreground">Today</h2>
-                <p className="text-sm text-muted-foreground">
-                  {formatDuration(scheduledMinutes)} scheduled before {cutoffLabel}
-                </p>
+            <div className="mt-12">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 border-b border-border/60 pb-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                    <Leaf className="h-5 w-5" strokeWidth={1.5} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="font-serif text-3xl sm:text-4xl font-normal leading-none text-foreground">Today</h2>
+                    <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground">Your plan is ready. You've got this.</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="inline-flex items-center gap-1.5 text-lg sm:text-xl font-medium text-foreground tabular-nums">
+                    <Clock className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
+                    {formatDuration(scheduledMinutes)}
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">scheduled before {cutoffLabel}</p>
+                </div>
               </div>
               {usedFallback && (
-                <p className="mt-1 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
+                <p className="mt-3 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
               )}
 
               {status && (
@@ -435,16 +447,25 @@ function DailyNest() {
               {scheduleWithMeta.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Tomorrow below.</p>
               ) : (
-                <ol className="mt-4 space-y-2.5">
+                <ol className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }) => {
                     if (entry.kind === "break") {
                       return (
-                        <li key={entry.id} className="rounded-lg border border-dashed border-border/80 bg-background/60 px-4 py-2.5">
-                          <div className="flex items-center gap-4">
-                            <div className="w-28 shrink-0 text-xs font-medium text-muted-foreground tabular-nums">
-                              {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                        <li key={entry.id} className="rounded-xl border border-border/60 bg-secondary/40 px-4 py-3">
+                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/70 text-primary">
+                              <Coffee className="h-5 w-5" strokeWidth={1.5} />
                             </div>
-                            <div className="text-sm text-muted-foreground">Short break</div>
+                            <div className="flex min-w-0 items-center gap-3 text-sm">
+                              <span className="font-medium text-muted-foreground tabular-nums">
+                                {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                              </span>
+                              <span className="text-muted-foreground">Short break</span>
+                            </div>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-0.5 text-xs text-priority-low-fg">
+                              <Leaf className="h-3 w-3" strokeWidth={1.7} />
+                              {formatDuration(entry.endMinutes - entry.startMinutes)}
+                            </span>
                           </div>
                         </li>
                       );
