@@ -446,21 +446,68 @@ function DailyNest() {
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
                 <FileText className="h-5 w-5" strokeWidth={1.6} />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  Tasks and worries
+                  What's on your mind?
                 </label>
-                <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
+              </div>
+              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "type"}
+                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "voice"}
+                  onClick={() => setMode("voice")}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
+                </button>
               </div>
             </div>
+
             <textarea
               id="tasks"
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
-              rows={8}
+              rows={mode === "voice" ? 5 : 8}
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
+
+            {mode === "voice" && (
+              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
+                <button
+                  type="button"
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={transcribing}
+                  aria-label={recording ? "Stop recording" : "Start recording"}
+                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
+                    recording
+                      ? "bg-priority-high text-priority-high-fg animate-pulse"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  }`}
+                >
+                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  {transcribing
+                    ? "Transcribing your voice note…"
+                    : recording
+                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
+                      : "Tap the mic and just talk. We'll add it to your notes above."}
+                </p>
+              </div>
+            )}
+
 
             <div className="my-6 h-px bg-border/70" />
 
