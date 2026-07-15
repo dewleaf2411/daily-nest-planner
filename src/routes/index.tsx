@@ -622,7 +622,12 @@ function DailyNest() {
 
               {tomorrow.length > 0 && (
                 <div className="mt-10">
-                  <h2 className="text-lg font-semibold text-foreground">Tomorrow</h2>
+                  <div className="flex items-center gap-3 border-b border-border/60 pb-4">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                      <Calendar className="h-5 w-5" strokeWidth={1.5} />
+                    </div>
+                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">Tomorrow</h2>
+                  </div>
                   <ul className="mt-3 space-y-2.5">
                     {tomorrow.map((t) => {
                       const item = items.find((i) => i.originalIndex === t.itemIndex);
