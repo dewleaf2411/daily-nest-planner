@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
@@ -320,50 +320,87 @@ function DailyNest() {
   const cutoffLabel = minutesToTimeLabel(cutoffMinutes);
 
   return (
-    <main className="min-h-screen w-full px-4 py-10 sm:py-16">
-      <div className="mx-auto w-full max-w-[860px]">
+    <main className="relative min-h-screen w-full overflow-hidden px-4 py-10 sm:py-16">
+      {/* soft decorative leaves */}
+      <div aria-hidden className="pointer-events-none absolute -left-16 top-24 hidden md:block opacity-40">
+        <Leaf className="h-72 w-72 text-primary/20 -rotate-12" strokeWidth={0.6} />
+      </div>
+      <div aria-hidden className="pointer-events-none absolute -right-16 top-10 hidden md:block opacity-30">
+        <Leaf className="h-64 w-64 text-primary/20 rotate-45" strokeWidth={0.6} />
+      </div>
+
+      <div className="relative mx-auto w-full max-w-[860px]">
         <header className="mb-8 sm:mb-10">
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-foreground">Planner</h1>
-          <p className="mt-2 text-sm sm:text-base text-muted-foreground">
+          <div className="flex items-center gap-4">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+              <Leaf className="h-6 w-6" strokeWidth={1.5} />
+            </div>
+            <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
+          </div>
+          <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
+          </p>
+          <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Heart className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
+            You don't have to do it all. We'll help you focus on what matters.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_28px_-12px_rgba(30,60,45,0.12)] p-5 sm:p-8">
+        <section className="rounded-2xl border border-border bg-card/90 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.03),0_20px_50px_-24px_rgba(30,60,45,0.18)] p-6 sm:p-8">
           <form onSubmit={onSubmit}>
-            <label htmlFor="tasks" className="block text-sm font-medium text-foreground">
-              Tasks and worries
-            </label>
-            <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
+                <FileText className="h-5 w-5" strokeWidth={1.6} />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
+                  Tasks and worries
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">One task, worry, commitment, or reminder per line.</p>
+              </div>
+            </div>
             <textarea
               id="tasks"
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
               rows={8}
-              className="mt-3 w-full resize-y rounded-lg border border-input bg-background px-3.5 py-3 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+              className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            <div className="mt-5 flex flex-col sm:flex-row sm:items-end gap-4">
-              <div className="flex-1">
-                <label htmlFor="until" className="block text-sm font-medium text-foreground">
+            <div className="my-6 h-px bg-border/70" />
+
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
+                <Clock className="h-5 w-5" strokeWidth={1.6} />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="until" className="block font-serif text-2xl font-normal text-foreground leading-tight">
                   Available until
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">We won't schedule tasks after this time.</p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="relative w-full sm:w-56">
+                <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
                 <input
                   id="until"
                   type="time"
                   value={availableUntil}
                   onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="mt-2 w-full sm:w-40 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+                  className="w-full rounded-xl border border-input bg-background/70 pl-9 pr-9 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
                 />
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="inline-flex items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-70 disabled:cursor-not-allowed"
+                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {loading ? "Making plan…" : "Make My Plan"}
+                {!loading && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={1.8} />}
               </button>
             </div>
 
@@ -380,15 +417,27 @@ function DailyNest() {
           )}
 
           {items && !loading && (
-            <div className="mt-10">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-lg font-semibold text-foreground">Today</h2>
-                <p className="text-sm text-muted-foreground">
-                  {formatDuration(scheduledMinutes)} scheduled before {cutoffLabel}
-                </p>
+            <div className="mt-12">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 border-b border-border/60 pb-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                    <Leaf className="h-5 w-5" strokeWidth={1.5} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="font-serif text-3xl sm:text-4xl font-normal leading-none text-foreground">Today</h2>
+                    <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground">Your plan is ready. You've got this.</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="inline-flex items-center gap-1.5 text-lg sm:text-xl font-medium text-foreground tabular-nums">
+                    <Clock className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
+                    {formatDuration(scheduledMinutes)}
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">scheduled before {cutoffLabel}</p>
+                </div>
               </div>
               {usedFallback && (
-                <p className="mt-1 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
+                <p className="mt-3 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
               )}
 
               {status && (
@@ -398,16 +447,25 @@ function DailyNest() {
               {scheduleWithMeta.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Tomorrow below.</p>
               ) : (
-                <ol className="mt-4 space-y-2.5">
+                <ol className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }) => {
                     if (entry.kind === "break") {
                       return (
-                        <li key={entry.id} className="rounded-lg border border-dashed border-border/80 bg-background/60 px-4 py-2.5">
-                          <div className="flex items-center gap-4">
-                            <div className="w-28 shrink-0 text-xs font-medium text-muted-foreground tabular-nums">
-                              {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                        <li key={entry.id} className="rounded-xl border border-border/60 bg-secondary/40 px-4 py-3">
+                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/70 text-primary">
+                              <Coffee className="h-5 w-5" strokeWidth={1.5} />
                             </div>
-                            <div className="text-sm text-muted-foreground">Short break</div>
+                            <div className="flex min-w-0 items-center gap-3 text-sm">
+                              <span className="font-medium text-muted-foreground tabular-nums">
+                                {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                              </span>
+                              <span className="text-muted-foreground">Short break</span>
+                            </div>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-0.5 text-xs text-priority-low-fg">
+                              <Leaf className="h-3 w-3" strokeWidth={1.7} />
+                              {formatDuration(entry.endMinutes - entry.startMinutes)}
+                            </span>
                           </div>
                         </li>
                       );
@@ -536,14 +594,14 @@ function DailyNest() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {item && !isEditing && (
+                            {item && (
                               <button
                                 type="button"
-                                onClick={() => startEdit(item.originalIndex)}
+                                onClick={() => (isEditing ? (setEditingIdx(null), setEditForm(null)) : startEdit(item.originalIndex))}
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                                aria-label={`Edit ${entry.title}`}
+                                aria-label={isEditing ? "Collapse editor" : `Edit ${entry.title}`}
                               >
-                                <Pencil className="h-3.5 w-3.5" /> Edit
+                                {isEditing ? (<><ChevronUp className="h-3.5 w-3.5" /> Collapse</>) : (<><Pencil className="h-3.5 w-3.5" /> Edit</>)}
                               </button>
                             )}
                             {isFlexible && (
@@ -564,7 +622,12 @@ function DailyNest() {
 
               {tomorrow.length > 0 && (
                 <div className="mt-10">
-                  <h2 className="text-lg font-semibold text-foreground">Tomorrow</h2>
+                  <div className="flex items-center gap-3 border-b border-border/60 pb-4">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                      <Calendar className="h-5 w-5" strokeWidth={1.5} />
+                    </div>
+                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">Tomorrow</h2>
+                  </div>
                   <ul className="mt-3 space-y-2.5">
                     {tomorrow.map((t) => {
                       const item = items.find((i) => i.originalIndex === t.itemIndex);
@@ -658,10 +721,16 @@ function DailyNest() {
                 </div>
               )}
 
-              <p className="mt-8 text-xs text-muted-foreground">Available until: {cutoffLabel}</p>
             </div>
           )}
         </section>
+
+        <p className="mt-6 flex items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+          <Sprout className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
+          {items && !loading
+            ? "You're building a great rhythm. Keep going."
+            : "We'll build a plan that feels doable and kind to you."}
+        </p>
       </div>
 
       {crowded && items && (
