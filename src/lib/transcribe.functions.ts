@@ -47,7 +47,9 @@ export const transcribeAudio = createServerFn({ method: "POST" })
 
     const bytes = base64ToUint8Array(data.audioBase64);
     const ext = extFor(data.mimeType);
-    const blob = new Blob([bytes], { type: data.mimeType });
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    const blob = new Blob([buffer], { type: data.mimeType });
 
     const form = new FormData();
     form.append("model", "openai/gpt-4o-mini-transcribe");
