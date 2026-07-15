@@ -1,954 +1,368 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
-import { planTasks } from "@/lib/planner.functions";
-import { transcribeAudio } from "@/lib/transcribe.functions";
-import type { PlanItem, Priority } from "@/lib/planner.types";
-import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import { Leaf, ArrowRight, Sprout, Feather, Wind } from "lucide-react";
+import heroBamboo from "@/assets/hero-bamboo.jpg";
+import ripple from "@/assets/ripple.jpg";
+import stones from "@/assets/stones.jpg";
 
 export const Route = createFileRoute("/")({
-  component: DailyNest,
+  component: Landing,
+  head: () => ({
+    meta: [
+      { title: "DailyNest — A calm plan for real life" },
+      { name: "description", content: "DailyNest turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
+      { property: "og:title", content: "DailyNest — A calm plan for real life" },
+      { property: "og:description", content: "A quiet space to plan your day, so you can live with intention." },
+    ],
+  }),
 });
 
-const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
-
-Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
-
-type InputMode = "type" | "voice";
-
-
-function hhmmToMinutes(s: string): number {
-  const [h, m] = s.split(":").map((n) => parseInt(n, 10));
-  return h * 60 + (m || 0);
-}
-
-function todayIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function daysBetween(fromIso: string, toIso: string): number {
-  const a = new Date(fromIso + "T00:00:00");
-  const b = new Date(toIso + "T00:00:00");
-  return Math.round((b.getTime() - a.getTime()) / 86400000);
-}
-
-function friendly(dueDate: string | null | undefined): { label: string | null; cat: PlanItem["dueCategory"] } {
-  if (!dueDate) return { label: null, cat: "none" };
-  const diff = daysBetween(todayIso(), dueDate);
-  if (diff < 0) return { label: "Overdue", cat: "overdue" };
-  if (diff === 0) return { label: "Due today", cat: "today" };
-  if (diff === 1) return { label: "Due tomorrow", cat: "tomorrow" };
-  return { label: `Due in ${diff} days`, cat: "future" };
-}
-
-function PriorityPill({ p }: { p: Priority }) {
-  const label = p === "high" ? "High" : p === "medium" ? "Medium" : "Low";
-  const cls =
-    p === "high"
-      ? "bg-priority-high text-priority-high-fg"
-      : p === "medium"
-        ? "bg-priority-medium text-priority-medium-fg"
-        : "bg-priority-low text-priority-low-fg";
-  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
-}
-
-function FixedPill() {
-  return <span className="inline-flex items-center rounded-full bg-fixed text-fixed-fg px-2 py-0.5 text-xs font-medium">Fixed time</span>;
-}
-
-function DueLabel({ label, cat }: { label: string; cat: PlanItem["dueCategory"] }) {
-  const cls =
-    cat === "overdue" || cat === "today"
-      ? "text-priority-high-fg"
-      : cat === "tomorrow"
-        ? "text-priority-medium-fg"
-        : "text-muted-foreground";
-  return <span className={`text-xs font-medium ${cls}`}>{label}</span>;
-}
-
-interface EditForm {
-  title: string;
-  dueDate: string;
-  durationMinutes: number;
-}
-
-interface CrowdedProposal {
-  itemIndex: number;
-  needMin: number;
-  availableMin: number;
-}
-
-function DailyNest() {
-  const [raw, setRaw] = useState("");
-  const [mode, setMode] = useState<InputMode>("type");
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [availableUntil, setAvailableUntil] = useState("22:00");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [items, setItems] = useState<PlanItem[] | null>(null);
-  const [userOrder, setUserOrder] = useState<number[]>([]);
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<EditForm | null>(null);
-  const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
-  const [usedFallback, setUsedFallback] = useState(false);
-  const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
-
-  const plan = useServerFn(planTasks);
-  const transcribe = useServerFn(transcribeAudio);
-
-
-  const nowMinutes = useMemo(() => {
-    const d = new Date();
-    return d.getHours() * 60 + d.getMinutes();
-  }, [items]); // recompute when items change (rebuild triggers)
-
-  const cutoffMinutes = hhmmToMinutes(availableUntil);
-
-  const order = useMemo(() => (items ? computeOrder(items, userOrder) : []), [items, userOrder]);
-
-  const { schedule, tomorrow, scheduledMinutes } = useMemo(() => {
-    if (!items) return { schedule: [], tomorrow: [], scheduledMinutes: 0 };
-    return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
-  }, [items, order, nowMinutes, cutoffMinutes]);
-
-  const pushHistory = () => {
-    if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil };
-  };
-
-  const flashStatus = (msg: string) => {
-    setStatus(msg);
-    window.setTimeout(() => setStatus((s) => (s === msg ? null : s)), 3500);
-  };
-
-  const onSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setStatus(null);
-    const brainDump = raw.trim();
-    if (!brainDump) {
-      setError("Type or record what's on your mind, then make your plan.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await plan({
-        data: {
-          brainDump,
-          nowIso: new Date().toISOString(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          availableUntil,
-        },
-      });
-      setItems(res.items);
-      setUserOrder([]);
-      setUsedFallback(res.usedFallback);
-    } catch (err) {
-      console.error(err);
-      setError("Something went wrong while making your plan. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, [raw, availableUntil, plan]);
-
-  const pickMimeType = (): string => {
-    if (typeof MediaRecorder === "undefined") return "";
-    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
-    for (const c of candidates) {
-      if (MediaRecorder.isTypeSupported(c)) return c;
-    }
-    return "";
-  };
-
-  const startRecording = useCallback(async () => {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickMimeType();
-      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
-        const type = recorder.mimeType || mime || "audio/webm";
-        const blob = new Blob(audioChunksRef.current, { type });
-        audioChunksRef.current = [];
-        if (blob.size < 1200) {
-          setError("That recording was too short — try again and speak for a few seconds.");
-          return;
-        }
-        setTranscribing(true);
-        try {
-          const buf = await blob.arrayBuffer();
-          // base64 encode
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-          }
-          const audioBase64 = btoa(binary);
-          const res = await transcribe({ data: { audioBase64, mimeType: type } });
-          const text = res.text.trim();
-          if (!text) {
-            setError("I couldn't hear anything in that recording. Try again?");
-          } else {
-            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
-            flashStatus("Added your voice note.");
-          }
-        } catch (err) {
-          console.error(err);
-          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setRecording(true);
-      setRecSeconds(0);
-      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
-    } catch (err) {
-      console.error(err);
-      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
-    }
-  }, [transcribe]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRecorderRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
-    mediaRecorderRef.current = null;
-    setRecording(false);
-  }, []);
-
+function useReveal() {
   useEffect(() => {
-    return () => {
-      if (recTimerRef.current) clearInterval(recTimerRef.current);
-      const rec = mediaRecorderRef.current;
-      if (rec && rec.state !== "inactive") rec.stop();
-    };
+    const els = document.querySelectorAll<HTMLElement>("[data-reveal]");
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("is-visible");
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { threshold: 0.15 },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
   }, []);
+}
 
+function useScrollY() {
+  const [y, setY] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setY(window.scrollY));
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return y;
+}
 
-  const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
-    setItems((prev) => (prev ? updater(prev) : prev));
-  };
-
-  const startEdit = (idx: number) => {
-    const it = items?.find((i) => i.originalIndex === idx);
-    if (!it) return;
-    setEditingIdx(idx);
-    setEditForm({ title: it.title, dueDate: it.dueDate ?? "", durationMinutes: it.durationMinutes });
-  };
-
-  const saveEdit = () => {
-    if (editingIdx === null || !editForm) return;
-    pushHistory();
-    updateItems((prev) =>
-      prev.map((it) => {
-        if (it.originalIndex !== editingIdx) return it;
-        const { label, cat } = friendly(editForm.dueDate || null);
-        return {
-          ...it,
-          title: editForm.title.trim() || it.title,
-          dueDate: editForm.dueDate || null,
-          dueLabel: label,
-          dueCategory: cat,
-          durationMinutes: Math.max(5, Math.round(editForm.durationMinutes / 5) * 5),
-        };
-      }),
-    );
-    setEditingIdx(null);
-    setEditForm(null);
-    flashStatus("Your changes were saved and the timeline was rebuilt.");
-  };
-
-  const moveOrder = (idx: number, dir: -1 | 1) => {
-    const cur = [...order];
-    const at = cur.indexOf(idx);
-    if (at < 0) return;
-    const to = at + dir;
-    if (to < 0 || to >= cur.length) return;
-    [cur[at], cur[to]] = [cur[to], cur[at]];
-    pushHistory();
-    setUserOrder(cur);
-    flashStatus("Your order was kept and the timeline was rebuilt.");
-  };
-
-  const moveToTomorrow = (idx: number) => {
-    pushHistory();
-    updateItems((prev) => prev.map((it) => (it.originalIndex === idx ? { ...it, suggestedDay: "tomorrow" as const } : it)));
-    setUserOrder((o) => o.filter((i) => i !== idx));
-    setEditingIdx(null);
-    flashStatus("Moved to Tomorrow.");
-  };
-
-  const requestMoveToToday = (idx: number) => {
-    if (!items) return;
-    const it = items.find((i) => i.originalIndex === idx);
-    if (!it) return;
-    // check how much free time there is
-    const test = buildSchedule({
-      items: items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)),
-      order: computeOrder(
-        items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)),
-        [...userOrder, idx],
-      ),
-      nowMinutes,
-      cutoffMinutes,
-    });
-    const overflow = test.tomorrow.find((t) => t.itemIndex === idx);
-    const needMin = it.durationMinutes;
-    const availableMin = Math.max(0, cutoffMinutes - Math.max(nowMinutes, 0));
-    if (overflow && overflow.remainingMinutes > 0) {
-      setCrowded({ itemIndex: idx, needMin, availableMin });
-    } else {
-      pushHistory();
-      updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)));
-      setUserOrder((o) => [...o, idx]);
-      flashStatus("Moved to Today.");
-    }
-  };
-
-  const crowdedMakeRoom = (moveIdx: number) => {
-    if (!crowded) return;
-    pushHistory();
-    updateItems((prev) =>
-      prev.map((x) => {
-        if (x.originalIndex === moveIdx) return { ...x, suggestedDay: "tomorrow" as const };
-        if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const };
-        return x;
-      }),
-    );
-    setUserOrder((o) => [...o.filter((i) => i !== moveIdx), crowded.itemIndex]);
-    setCrowded(null);
-    flashStatus("Made room and rebuilt the timeline.");
-  };
-
-  const crowdedExtend = () => {
-    if (!crowded) return;
-    const needExtraMin = crowded.needMin - crowded.availableMin;
-    const capMin = 3 * 60;
-    const extra = Math.min(needExtraMin, capMin);
-    const newCutoff = Math.min(cutoffMinutes + extra, 23 * 60 + 59);
-    const h = Math.floor(newCutoff / 60);
-    const m = newCutoff % 60;
-    pushHistory();
-    setAvailableUntil(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const } : x)));
-    setUserOrder((o) => [...o, crowded.itemIndex]);
-    setCrowded(null);
-    flashStatus("Extended your available time and added the task.");
-  };
-
-  const crowdedDoPart = () => {
-    if (!crowded) return;
-    pushHistory();
-    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const } : x)));
-    setUserOrder((o) => [...o, crowded.itemIndex]);
-    setCrowded(null);
-    flashStatus("Placed as much as fits today; the rest is in Tomorrow.");
-  };
-
-  const undo = () => {
-    if (!historyRef.current) return;
-    setItems(historyRef.current.items);
-    setUserOrder(historyRef.current.order);
-    setAvailableUntil(historyRef.current.availableUntil);
-    historyRef.current = null;
-    setCrowded(null);
-    flashStatus("Restored the previous plan.");
-  };
-
-  // Drag-and-drop for flexible today tasks
-  const dragIdxRef = useRef<number | null>(null);
-  const onDragStart = (idx: number) => (e: React.DragEvent) => {
-    dragIdxRef.current = idx;
-    e.dataTransfer.effectAllowed = "move";
-  };
-  const onDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  };
-  const onDrop = (targetIdx: number) => (e: React.DragEvent) => {
-    e.preventDefault();
-    const src = dragIdxRef.current;
-    dragIdxRef.current = null;
-    if (src === null || src === targetIdx) return;
-    const cur = [...order];
-    const from = cur.indexOf(src);
-    const to = cur.indexOf(targetIdx);
-    if (from < 0 || to < 0) return;
-    cur.splice(to, 0, cur.splice(from, 1)[0]);
-    pushHistory();
-    setUserOrder(cur);
-    flashStatus("Your order was kept and the timeline was rebuilt.");
-  };
-
-  // Group schedule entries by task to render blocks together
-  const scheduleWithMeta = schedule.map((s) => {
-    if (s.kind === "task") {
-      const item = items?.find((i) => i.originalIndex === s.itemIndex);
-      return { entry: s, item };
-    }
-    if (s.kind === "fixed") {
-      const item = items?.find((i) => i.originalIndex === s.itemIndex);
-      return { entry: s, item };
-    }
-    return { entry: s, item: undefined };
-  });
-
-  const cutoffLabel = minutesToTimeLabel(cutoffMinutes);
+function Landing() {
+  useReveal();
+  const y = useScrollY();
+  const heroRef = useRef<HTMLDivElement>(null);
 
   return (
-    <main className="relative min-h-screen w-full overflow-hidden px-4 py-10 sm:py-16">
-      {/* soft decorative leaves */}
-      <div aria-hidden className="pointer-events-none absolute -left-16 top-24 hidden md:block opacity-40">
-        <Leaf className="h-72 w-72 text-primary/20 -rotate-12" strokeWidth={0.6} />
-      </div>
-      <div aria-hidden className="pointer-events-none absolute -right-16 top-10 hidden md:block opacity-30">
-        <Leaf className="h-64 w-64 text-primary/20 rotate-45" strokeWidth={0.6} />
-      </div>
+    <div className="relative min-h-screen text-foreground overflow-x-hidden">
+      <style>{`
+        [data-reveal]{opacity:0;transform:translateY(28px);transition:opacity 1.1s ease,transform 1.1s cubic-bezier(.2,.7,.2,1);}
+        [data-reveal].is-visible{opacity:1;transform:none;}
+        [data-reveal-delay="1"]{transition-delay:.15s}
+        [data-reveal-delay="2"]{transition-delay:.3s}
+        [data-reveal-delay="3"]{transition-delay:.45s}
+        @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+        .floaty{animation:floaty 6s ease-in-out infinite}
+        @keyframes drift{0%{transform:translate3d(-5%,0,0)}100%{transform:translate3d(5%,0,0)}}
+        .drift{animation:drift 22s ease-in-out infinite alternate}
+        .grain::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;background-image:radial-gradient(rgba(255,255,255,.6) 1px,transparent 1px);background-size:3px 3px}
+      `}</style>
 
-      <div className="relative mx-auto w-full max-w-[860px]">
-        <header className="mb-8 sm:mb-10">
-          <div className="flex items-center gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-              <Leaf className="h-6 w-6" strokeWidth={1.5} />
+      {/* NAV */}
+      <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/40 border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-full bg-primary/90 flex items-center justify-center">
+              <Leaf className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
+            <span style={{ fontFamily: "var(--font-serif)" }} className="text-2xl">DailyNest</span>
           </div>
-          <p className="mt-4 text-sm sm:text-base text-muted-foreground">
-            A calm, honest plan for today — no dashboards, no streaks.
+          <div className="hidden md:flex items-center gap-8 text-sm text-foreground/70">
+            <a href="#philosophy" className="hover:text-foreground transition">Philosophy</a>
+            <a href="#features" className="hover:text-foreground transition">Features</a>
+            <a href="#preview" className="hover:text-foreground transition">A day inside</a>
+          </div>
+          <Link
+            to="/plan"
+            className="inline-flex items-center gap-2 rounded-full bg-primary text-primary-foreground px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
+          >
+            Get Started <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </nav>
+
+      {/* HERO */}
+      <section ref={heroRef} className="relative h-[100vh] w-full overflow-hidden">
+        <div
+          className="absolute inset-0 will-change-transform"
+          style={{
+            transform: `translate3d(0, ${y * 0.35}px, 0) scale(${1 + y * 0.0004})`,
+          }}
+        >
+          <img src={heroBamboo} alt="" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-background" />
+        </div>
+
+        <div
+          className="relative z-10 h-full max-w-7xl mx-auto px-6 flex flex-col justify-center"
+          style={{ opacity: Math.max(0, 1 - y / 500) }}
+        >
+          <p data-reveal className="text-xs tracking-[0.3em] uppercase text-white/70 mb-6">
+            A calm plan for real life
           </p>
-          <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <Heart className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
-            You don't have to do it all. We'll help you focus on what matters.
+          <h1
+            data-reveal
+            data-reveal-delay="1"
+            style={{ fontFamily: "var(--font-serif)" }}
+            className="text-white text-6xl md:text-8xl leading-[1.05] max-w-4xl"
+          >
+            Plan your day,
+            <br />
+            live with peace.
+            <br />
+            <em className="text-white/80">Gently.</em>
+          </h1>
+          <p
+            data-reveal
+            data-reveal-delay="2"
+            className="mt-8 max-w-md text-white/80 text-lg leading-relaxed"
+          >
+            DailyNest helps you create a plan that&apos;s realistic, personal, and
+            pressure-free — so you can focus on what truly matters.
           </p>
-        </header>
-
-        <section className="rounded-2xl border border-border bg-card/90 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.03),0_20px_50px_-24px_rgba(30,60,45,0.18)] p-6 sm:p-8">
-          <form onSubmit={onSubmit}>
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
-                <FileText className="h-5 w-5" strokeWidth={1.6} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  What's on your mind?
-                </label>
-                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
-              </div>
-              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "type"}
-                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "voice"}
-                  onClick={() => setMode("voice")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
-                </button>
-              </div>
-            </div>
-
-            <textarea
-              id="tasks"
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              placeholder={PLACEHOLDER}
-              rows={mode === "voice" ? 5 : 8}
-              className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-            />
-
-            {mode === "voice" && (
-              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
-                <button
-                  type="button"
-                  onClick={recording ? stopRecording : startRecording}
-                  disabled={transcribing}
-                  aria-label={recording ? "Stop recording" : "Start recording"}
-                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
-                    recording
-                      ? "bg-priority-high text-priority-high-fg animate-pulse"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  }`}
-                >
-                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  {transcribing
-                    ? "Transcribing your voice note…"
-                    : recording
-                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
-                      : "Tap the mic and just talk. We'll add it to your notes above."}
-                </p>
-              </div>
-            )}
-
-
-            <div className="my-6 h-px bg-border/70" />
-
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-secondary text-primary">
-                <Clock className="h-5 w-5" strokeWidth={1.6} />
-              </div>
-              <div className="min-w-0">
-                <label htmlFor="until" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  Available until
-                </label>
-                <p className="mt-1 text-xs text-muted-foreground">We won't schedule tasks after this time.</p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="relative w-full sm:w-56">
-                <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-                <input
-                  id="until"
-                  type="time"
-                  value={availableUntil}
-                  onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background/70 pl-9 pr-9 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-                />
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-              </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="group inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {loading ? "Making plan…" : "Make My Plan"}
-                {!loading && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={1.8} />}
-              </button>
-            </div>
-
-            {error && (
-              <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg bg-soft-error px-3 py-2.5 text-sm text-soft-error-fg">
-                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-          </form>
-
-          {loading && (
-            <div className="mt-8 text-center text-sm text-muted-foreground">Making your plan…</div>
-          )}
-
-          {items && !loading && (
-            <div className="mt-12">
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 border-b border-border/60 pb-5">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-                    <Leaf className="h-5 w-5" strokeWidth={1.5} />
-                  </div>
-                  <div className="min-w-0">
-                    <h2 className="font-serif text-3xl sm:text-4xl font-normal leading-none text-foreground">Today</h2>
-                    <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground">Your plan is ready. You've got this.</p>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="inline-flex items-center gap-1.5 text-lg sm:text-xl font-medium text-foreground tabular-nums">
-                    <Clock className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-                    {formatDuration(scheduledMinutes)}
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">scheduled before {cutoffLabel}</p>
-                </div>
-              </div>
-              {usedFallback && (
-                <p className="mt-3 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
-              )}
-
-              {status && (
-                <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">{status}</div>
-              )}
-
-              {scheduleWithMeta.length === 0 ? (
-                <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Tomorrow below.</p>
-              ) : (
-                <ol className="mt-5 space-y-2.5">
-                  {scheduleWithMeta.map(({ entry, item }) => {
-                    if (entry.kind === "break") {
-                      return (
-                        <li key={entry.id} className="rounded-xl border border-border/60 bg-secondary/40 px-4 py-3">
-                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
-                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/70 text-primary">
-                              <Coffee className="h-5 w-5" strokeWidth={1.5} />
-                            </div>
-                            <div className="flex min-w-0 items-center gap-3 text-sm">
-                              <span className="font-medium text-muted-foreground tabular-nums">
-                                {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
-                              </span>
-                              <span className="text-muted-foreground">Short break</span>
-                            </div>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-0.5 text-xs text-priority-low-fg">
-                              <Leaf className="h-3 w-3" strokeWidth={1.7} />
-                              {formatDuration(entry.endMinutes - entry.startMinutes)}
-                            </span>
-                          </div>
-                        </li>
-                      );
-                    }
-                    const isEditing = item && editingIdx === item.originalIndex;
-                    const isFlexible = entry.kind === "task";
-                    return (
-                      <li
-                        key={entry.id}
-                        draggable={isFlexible && !isEditing}
-                        onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
-                        onDragOver={isFlexible ? onDragOver : undefined}
-                        onDrop={isFlexible && item ? onDrop(item.originalIndex) : undefined}
-                        className="group rounded-xl border border-border bg-card p-3 sm:p-4"
-                      >
-                        <div className="flex items-start gap-3 sm:gap-4">
-                          <div className="flex flex-col items-center gap-1 shrink-0">
-                            <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center">
-                              {entry.kind === "fixed" ? <Calendar className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                            </div>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                              <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                                {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
-                              </span>
-                              {entry.blockNumber && entry.totalBlocks && (
-                                <span className="text-xs text-muted-foreground">
-                                  Block {entry.blockNumber} of {entry.totalBlocks}
-                                </span>
-                              )}
-                              {entry.priority && <PriorityPill p={entry.priority} />}
-                              {entry.isFixed && <FixedPill />}
-                              {entry.dueLabel && entry.isFirstBlock && (
-                                <DueLabel label={entry.dueLabel} cat={item?.dueCategory ?? "none"} />
-                              )}
-                            </div>
-                            <div className="mt-1 text-sm font-medium text-foreground truncate">{entry.title}</div>
-                            {entry.isFirstBlock && entry.totalDuration && (
-                              <div className="mt-0.5 text-xs text-muted-foreground">
-                                Total: {formatDuration(entry.totalDuration)} ·{" "}
-                                {entry.focusBlockMinutes
-                                  ? `Focus: ${entry.focusBlockMinutes} min`
-                                  : "One work block"}
-                              </div>
-                            )}
-                            {item && isEditing && editForm && (
-                              <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 space-y-2">
-                                <div>
-                                  <label className="block text-xs font-medium text-muted-foreground">Title</label>
-                                  <input
-                                    value={editForm.title}
-                                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                                    className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                  />
-                                </div>
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  <div className="flex-1">
-                                    <label className="block text-xs font-medium text-muted-foreground">Due date</label>
-                                    <input
-                                      type="date"
-                                      value={editForm.dueDate}
-                                      onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
-                                      className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                    />
-                                  </div>
-                                  <div className="flex-1">
-                                    <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
-                                    <input
-                                      type="number"
-                                      min={5}
-                                      step={5}
-                                      value={editForm.durationMinutes}
-                                      onChange={(e) => setEditForm({ ...editForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
-                                      className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                    />
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap gap-2 pt-1">
-                                  {isFlexible && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => moveOrder(item.originalIndex, -1)}
-                                        className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                                      >
-                                        <ArrowUp className="h-3.5 w-3.5" /> Move earlier
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => moveOrder(item.originalIndex, 1)}
-                                        className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                                      >
-                                        <ArrowDown className="h-3.5 w-3.5" /> Move later
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => moveToTomorrow(item.originalIndex)}
-                                        className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                                      >
-                                        Move to Tomorrow
-                                      </button>
-                                    </>
-                                  )}
-                                  <div className="ml-auto flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingIdx(null);
-                                        setEditForm(null);
-                                      }}
-                                      className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={saveEdit}
-                                      className="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                                    >
-                                      Save
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {item && (
-                              <button
-                                type="button"
-                                onClick={() => (isEditing ? (setEditingIdx(null), setEditForm(null)) : startEdit(item.originalIndex))}
-                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                                aria-label={isEditing ? "Collapse editor" : `Edit ${entry.title}`}
-                              >
-                                {isEditing ? (<><ChevronUp className="h-3.5 w-3.5" /> Collapse</>) : (<><Pencil className="h-3.5 w-3.5" /> Edit</>)}
-                              </button>
-                            )}
-                            {isFlexible && (
-                              <span
-                                className="hidden sm:inline-flex cursor-grab items-center px-1 text-muted-foreground/60"
-                                aria-hidden
-                              >
-                                <GripVertical className="h-4 w-4" />
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-
-              {tomorrow.length > 0 && (
-                <div className="mt-10">
-                  <div className="flex items-center gap-3 border-b border-border/60 pb-4">
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-                      <Calendar className="h-5 w-5" strokeWidth={1.5} />
-                    </div>
-                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">Tomorrow</h2>
-                  </div>
-                  <ul className="mt-3 space-y-2.5">
-                    {tomorrow.map((t) => {
-                      const item = items.find((i) => i.originalIndex === t.itemIndex);
-                      const isEditing = editingIdx === t.itemIndex;
-                      return (
-                        <li key={`tm-${t.itemIndex}`} className="rounded-xl border border-border bg-card p-3 sm:p-4">
-                          <div className="flex items-start gap-3 sm:gap-4">
-                            <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center shrink-0">
-                              <Calendar className="h-5 w-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span className="text-xs font-medium text-muted-foreground">Tomorrow</span>
-                                <PriorityPill p={t.priority} />
-                                {t.dueLabel && item && <DueLabel label={t.dueLabel} cat={item.dueCategory} />}
-                              </div>
-                              <div className="mt-1 text-sm font-medium text-foreground">{t.title}</div>
-                              <div className="mt-0.5 text-xs text-muted-foreground">{formatDuration(t.remainingMinutes)} remaining</div>
-                              {isEditing && editForm && item && (
-                                <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 space-y-2">
-                                  <div>
-                                    <label className="block text-xs font-medium text-muted-foreground">Title</label>
-                                    <input
-                                      value={editForm.title}
-                                      onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                                      className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                    />
-                                  </div>
-                                  <div className="flex flex-col sm:flex-row gap-2">
-                                    <div className="flex-1">
-                                      <label className="block text-xs font-medium text-muted-foreground">Due date</label>
-                                      <input
-                                        type="date"
-                                        value={editForm.dueDate}
-                                        onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                      />
-                                    </div>
-                                    <div className="flex-1">
-                                      <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
-                                      <input
-                                        type="number"
-                                        min={5}
-                                        step={5}
-                                        value={editForm.durationMinutes}
-                                        onChange={(e) => setEditForm({ ...editForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-end gap-2 pt-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => { setEditingIdx(null); setEditForm(null); }}
-                                      className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs hover:bg-accent"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={saveEdit}
-                                      className="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                                    >
-                                      Save
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => requestMoveToToday(t.itemIndex)}
-                                className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                              >
-                                Move to today
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => startEdit(t.itemIndex)}
-                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                              >
-                                <Pencil className="h-3.5 w-3.5" /> Edit
-                              </button>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-
-            </div>
-          )}
-        </section>
-
-        <p className="mt-6 flex items-center justify-center gap-2 text-center text-sm text-muted-foreground">
-          <Sprout className="h-4 w-4 text-primary/70" strokeWidth={1.6} />
-          {items && !loading
-            ? "You're building a great rhythm. Keep going."
-            : "We'll build a plan that feels doable and kind to you."}
-        </p>
-      </div>
-
-      {crowded && items && (
-        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <h3 className="text-base font-semibold text-foreground">This may make today feel crowded</h3>
-              <button
-                type="button"
-                onClick={() => setCrowded(null)}
-                aria-label="Close"
-                className="rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This task needs about {formatDuration(crowded.needMin)}, but only about {formatDuration(crowded.availableMin)} is free before {cutoffLabel}.
-            </p>
-
-            <div className="mt-4 space-y-2">
-              <details className="rounded-lg border border-border bg-background/60 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-foreground">Make room</summary>
-                <ul className="mt-2 space-y-1.5">
-                  {items
-                    .filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex)
-                    .map((i) => (
-                      <li key={`mr-${i.originalIndex}`} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate">
-                          {i.title} <span className="text-muted-foreground">· {formatDuration(i.durationMinutes)}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => crowdedMakeRoom(i.originalIndex)}
-                          className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
-                        >
-                          Move to tomorrow
-                        </button>
-                      </li>
-                    ))}
-                  {items.filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex).length === 0 && (
-                    <li className="text-xs text-muted-foreground">No lower-priority today tasks to move.</li>
-                  )}
-                </ul>
-              </details>
-
-              <button
-                type="button"
-                onClick={crowdedExtend}
-                className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
-              >
-                Extend to the suggested time
-                <div className="text-xs text-muted-foreground mt-0.5">Adds up to 3 more hours today.</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={crowdedDoPart}
-                className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
-              >
-                Do part today
-                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the rest stays in Tomorrow.</div>
-              </button>
-
-              {historyRef.current && (
-                <button
-                  type="button"
-                  onClick={undo}
-                  className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
-                >
-                  Undo move
-                </button>
-              )}
-            </div>
+          <div data-reveal data-reveal-delay="3" className="mt-10 flex items-center gap-3 text-white/70">
+            <Sprout className="w-4 h-4" />
+            <span className="text-sm italic" style={{ fontFamily: "var(--font-serif)" }}>
+              Are you ready to feel in control again?
+            </span>
+          </div>
+          <div data-reveal data-reveal-delay="3" className="mt-8">
+            <Link
+              to="/plan"
+              className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-8 py-4 text-base font-medium shadow-2xl hover:opacity-95 transition"
+            >
+              Get Started
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </Link>
+            <p className="mt-3 text-xs text-white/60">No credit card required</p>
           </div>
         </div>
-      )}
-    </main>
+
+        {/* scroll cue */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 text-white/60 text-xs flex flex-col items-center gap-2 floaty">
+          <span className="tracking-[0.3em] uppercase">Scroll</span>
+          <div className="w-px h-10 bg-white/40" />
+        </div>
+      </section>
+
+      {/* PHILOSOPHY — parallax ripple */}
+      <section id="philosophy" className="relative min-h-[90vh] overflow-hidden flex items-center">
+        <div
+          className="absolute inset-0"
+          style={{ transform: `translate3d(0, ${(y - 600) * 0.15}px, 0)` }}
+        >
+          <img src={ripple} alt="" className="w-full h-full object-cover" loading="lazy" />
+          <div className="absolute inset-0 bg-gradient-to-r from-background via-background/70 to-transparent" />
+        </div>
+        <div className="relative z-10 max-w-7xl mx-auto px-6 py-32 grid md:grid-cols-2 gap-12 items-center">
+          <div>
+            <p data-reveal className="text-xs tracking-[0.3em] uppercase text-foreground/60 mb-6">
+              每 日 · 安 集
+            </p>
+            <h2
+              data-reveal
+              data-reveal-delay="1"
+              style={{ fontFamily: "var(--font-serif)" }}
+              className="text-5xl md:text-6xl leading-tight"
+            >
+              A quiet space to plan,
+              <br />
+              <em>so you can live with intention.</em>
+            </h2>
+            <p data-reveal data-reveal-delay="2" className="mt-8 text-lg text-foreground/70 max-w-lg leading-relaxed">
+              DailyNest is more than a planner. It&apos;s a daily ritual that helps you
+              slow down, think clearly, and move forward with calm.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* FEATURES */}
+      <section id="features" className="relative py-32 bg-secondary/40">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-20">
+            <p data-reveal className="text-xs tracking-[0.3em] uppercase text-foreground/60 mb-4">
+              Why DailyNest
+            </p>
+            <h2
+              data-reveal
+              data-reveal-delay="1"
+              style={{ fontFamily: "var(--font-serif)" }}
+              className="text-5xl md:text-6xl"
+            >
+              Built to feel human.
+            </h2>
+          </div>
+          <div className="grid md:grid-cols-3 gap-8">
+            {[
+              {
+                icon: Leaf,
+                title: "Realistic by design",
+                text: "Plans that flex with you, not the other way around.",
+              },
+              {
+                icon: Wind,
+                title: "Simple & soothing",
+                text: "A clean space to think, plan, and breathe.",
+              },
+              {
+                icon: Feather,
+                title: "Focus on what matters",
+                text: "Prioritize what's important and let go of the rest.",
+              },
+            ].map((f, i) => (
+              <div
+                key={f.title}
+                data-reveal
+                data-reveal-delay={String(i + 1)}
+                className="bg-card/80 backdrop-blur border border-border/60 rounded-3xl p-8 hover:shadow-xl transition-shadow"
+              >
+                <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-6">
+                  <f.icon className="w-6 h-6 text-primary" />
+                </div>
+                <h3
+                  style={{ fontFamily: "var(--font-serif)" }}
+                  className="text-2xl mb-3"
+                >
+                  {f.title}
+                </h3>
+                <p className="text-foreground/70 leading-relaxed">{f.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* PREVIEW / MOCKUP */}
+      <section id="preview" className="relative py-32 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
+          <div data-reveal className="relative">
+            <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-border/60 bg-card">
+              <div className="p-5 border-b border-border/60 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-primary/90 flex items-center justify-center">
+                    <Leaf className="w-4 h-4 text-primary-foreground" />
+                  </div>
+                  <span style={{ fontFamily: "var(--font-serif)" }} className="text-xl">Today</span>
+                </div>
+                <div className="flex gap-2 text-[10px]">
+                  <span className="px-2 py-1 rounded-full bg-secondary">6 Tasks</span>
+                  <span className="px-2 py-1 rounded-full bg-secondary">3 Focus</span>
+                </div>
+              </div>
+              <div className="p-5 space-y-3">
+                {[
+                  { t: "6:20 – 6:50", n: "Organize computer files", tag: "Low" },
+                  { t: "6:50 – 6:55", n: "Hydrate", tag: "Low" },
+                  { t: "6:55 – 7:25", n: "Finish math homework", tag: "High" },
+                  { t: "7:30 – 8:00", n: "Reply to important messages", tag: "High" },
+                ].map((r) => (
+                  <div key={r.n} className="flex items-center gap-4 p-3 rounded-xl border border-border/50 bg-background/60">
+                    <span className="text-xs text-foreground/60 w-24 shrink-0">{r.t}</span>
+                    <span className="text-sm flex-1">{r.n}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${r.tag === "High" ? "bg-priority-high text-priority-high-fg" : "bg-priority-low text-priority-low-fg"}`}>
+                      {r.tag}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div>
+            <p data-reveal className="text-xs tracking-[0.3em] uppercase text-foreground/60 mb-4">
+              Plan with clarity
+            </p>
+            <h2
+              data-reveal
+              data-reveal-delay="1"
+              style={{ fontFamily: "var(--font-serif)" }}
+              className="text-5xl md:text-6xl leading-tight"
+            >
+              A day, beautifully organized.
+            </h2>
+            <p data-reveal data-reveal-delay="2" className="mt-6 text-lg text-foreground/70 leading-relaxed max-w-md">
+              DailyNest brings structure to your day without the stress.
+            </p>
+            <p data-reveal data-reveal-delay="2" className="mt-3 text-foreground/60 italic" style={{ fontFamily: "var(--font-serif)" }}>
+              See your plan. Stay focused. Feel at ease.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* AFFIRMATION BANNER */}
+      <section className="relative py-24 overflow-hidden">
+        <div className="absolute inset-0">
+          <img src={stones} alt="" className="w-full h-full object-cover" loading="lazy" />
+          <div className="absolute inset-0 bg-primary/70" />
+        </div>
+        <div className="relative z-10 max-w-5xl mx-auto px-6 text-center text-primary-foreground">
+          <h2
+            data-reveal
+            style={{ fontFamily: "var(--font-serif)" }}
+            className="text-4xl md:text-5xl mb-10"
+          >
+            Less overwhelm. More clarity.
+          </h2>
+          <div className="grid md:grid-cols-3 gap-8 text-primary-foreground/90">
+            {[
+              "Take one calm step at a time.",
+              "A gentle plan helps you stay on track.",
+              "Peace of mind becomes your rhythm.",
+            ].map((t, i) => (
+              <p key={t} data-reveal data-reveal-delay={String(i + 1)} className="leading-relaxed">
+                {t}
+              </p>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="relative py-32">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2
+            data-reveal
+            style={{ fontFamily: "var(--font-serif)" }}
+            className="text-5xl md:text-7xl leading-tight"
+          >
+            You don&apos;t need a perfect plan.
+            <br />
+            <em>You need a plan that supports you.</em>
+          </h2>
+          <p data-reveal data-reveal-delay="1" className="mt-8 text-foreground/70 text-lg">
+            DailyNest is here for your real life.
+          </p>
+          <div data-reveal data-reveal-delay="2" className="mt-12 flex flex-col items-center gap-3">
+            <Sprout className="w-5 h-5 text-primary" />
+            <Link
+              to="/plan"
+              className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-10 py-5 text-lg font-medium shadow-xl hover:opacity-95 transition"
+            >
+              Get Started
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </Link>
+            <p className="text-xs text-foreground/50">No credit card required</p>
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-border/60 py-8 text-center text-xs text-foreground/50">
+        © {new Date().getFullYear()} DailyNest — Made gently.
+      </footer>
+    </div>
   );
 }
