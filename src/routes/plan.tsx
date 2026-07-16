@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
@@ -6,10 +6,50 @@ import { planTasks } from "@/lib/planner.functions";
 import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
+import { supabase } from "@/integrations/supabase/client";
+import { ProfileMenu } from "@/components/ProfileMenu";
 
 export const Route = createFileRoute("/plan")({
-  component: DailyNest,
+  component: PlanRoute,
 });
+
+function PlanRoute() {
+  const navigate = useNavigate();
+  const [checked, setChecked] = useState(false);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        navigate({ to: "/auth", replace: true });
+      } else {
+        setAuthed(true);
+      }
+      setChecked(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session) {
+        setAuthed(false);
+        navigate({ to: "/auth", replace: true });
+      } else {
+        setAuthed(true);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [navigate]);
+
+  if (!checked || !authed) {
+    return (
+      <main className="min-h-screen w-full grid place-items-center">
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </div>
+      </main>
+    );
+  }
+
+  return <DailyNest />;
+}
 
 const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
 
@@ -425,11 +465,14 @@ function DailyNest() {
 
       <div className="relative mx-auto w-full max-w-[860px]">
         <header className="mb-8 sm:mb-10">
-          <div className="flex items-center gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-              <Leaf className="h-6 w-6" strokeWidth={1.5} />
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                <Leaf className="h-6 w-6" strokeWidth={1.5} />
+              </div>
+              <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
             </div>
-            <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
+            <ProfileMenu />
           </div>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
