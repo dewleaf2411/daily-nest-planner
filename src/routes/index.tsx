@@ -107,7 +107,7 @@ function Landing() {
         </div>
 
         <div
-          className="relative z-10 h-full max-w-7xl mx-auto px-6 flex flex-col justify-center"
+          className="relative z-10 h-full max-w-7xl mx-auto px-6 pt-24 flex flex-col justify-center"
           style={{ opacity: Math.max(0, 1 - y / 500) }}
         >
           <p data-reveal className="text-xs tracking-[0.3em] uppercase text-white/70 mb-6">
