@@ -167,7 +167,7 @@ function Landing() {
       </section>
 
       {/* PHILOSOPHY — parallax ripple */}
-      <section id="philosophy" className="relative min-h-[90vh] overflow-hidden flex items-center">
+      <section id="philosophy" className="relative min-h-[90vh] overflow-hidden flex items-center -mt-32">
         <div
           className="absolute inset-0"
           style={{ transform: `translate3d(0, ${(y - 600) * 0.15}px, 0)` }}
@@ -175,6 +175,10 @@ function Landing() {
           <img src={ripple} alt="" className="w-full h-full object-cover" loading="lazy" />
           <div className="absolute inset-0 bg-gradient-to-r from-background via-background/70 to-transparent" />
         </div>
+        {/* top blend into hero */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-background via-background/80 to-transparent z-[5]" />
+        {/* bottom blend into features */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-secondary/40 to-transparent z-[5]" />
         <div className="relative z-10 max-w-7xl mx-auto px-6 py-32 grid md:grid-cols-2 gap-12 items-center">
           <div>
             <p data-reveal className="text-xs tracking-[0.3em] uppercase text-foreground/60 mb-6">
