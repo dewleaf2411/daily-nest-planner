@@ -465,11 +465,14 @@ function DailyNest() {
 
       <div className="relative mx-auto w-full max-w-[860px]">
         <header className="mb-8 sm:mb-10">
-          <div className="flex items-center gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-              <Leaf className="h-6 w-6" strokeWidth={1.5} />
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                <Leaf className="h-6 w-6" strokeWidth={1.5} />
+              </div>
+              <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
             </div>
-            <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
+            <ProfileMenu />
           </div>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
