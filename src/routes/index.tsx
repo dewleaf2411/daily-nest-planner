@@ -95,7 +95,7 @@ function Landing() {
       </nav>
 
       {/* HERO */}
-      <section ref={heroRef} className="relative h-[100vh] w-full overflow-hidden">
+      <section ref={heroRef} className="relative min-h-[100dvh] w-full overflow-hidden">
         <div
           className="absolute inset-0 will-change-transform"
           style={{
@@ -107,7 +107,7 @@ function Landing() {
         </div>
 
         <div
-          className="relative z-10 h-full max-w-7xl mx-auto px-6 pt-24 flex flex-col justify-center"
+          className="relative z-10 min-h-[100dvh] max-w-7xl mx-auto px-6 pt-40 pb-24 flex flex-col justify-start"
           style={{ opacity: Math.max(0, 1 - y / 500) }}
         >
           <p data-reveal className="text-xs tracking-[0.3em] uppercase text-white/70 mb-6">
