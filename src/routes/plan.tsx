@@ -142,10 +142,26 @@ function DailyNest() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [savedCommitments, setSavedCommitments] = useState<Array<{ id: string; name: string; days_of_week: number[]; start_time: string; end_time: string; enabled: boolean }>>([]);
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
   const transcribe = useServerFn(transcribeAudio);
+
+  // Load user defaults and commitments once
+  useEffect(() => {
+    (async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) return;
+      const [{ data: p }, { data: c }] = await Promise.all([
+        supabase.from("profiles").select("default_available_until").eq("id", uid).maybeSingle(),
+        supabase.from("fixed_commitments").select("*").eq("user_id", uid).eq("enabled", true),
+      ]);
+      if (p?.default_available_until) setAvailableUntil(p.default_available_until as string);
+      setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
+    })();
+  }, []);
 
 
   const nowMinutes = useMemo(() => {
@@ -190,7 +206,33 @@ function DailyNest() {
           availableUntil,
         },
       });
-      setItems(res.items);
+      // Inject enabled fixed commitments for today as locked items
+      const todayDow = new Date().getDay();
+      const nextIdx = res.items.reduce((m, it) => Math.max(m, it.originalIndex), -1) + 1;
+      const commitmentItems: PlanItem[] = savedCommitments
+        .filter((c) => c.enabled && c.days_of_week.includes(todayDow))
+        .map((c, i) => {
+          const [sh, sm] = c.start_time.split(":").map((n) => parseInt(n, 10));
+          const [eh, em] = c.end_time.split(":").map((n) => parseInt(n, 10));
+          const duration = Math.max(5, (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0)));
+          return {
+            originalIndex: nextIdx + i,
+            title: c.name,
+            durationMinutes: duration,
+            priority: "high",
+            reason: "Weekly commitment",
+            dueDate: null,
+            dueLabel: null,
+            dueCategory: "none",
+            suggestedDay: "today",
+            isFixed: true,
+            fixedStart: c.start_time,
+            fixedEnd: c.end_time,
+            focusBlockMinutes: null,
+            note: null,
+          };
+        });
+      setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
     } catch (err) {
@@ -199,7 +241,7 @@ function DailyNest() {
     } finally {
       setLoading(false);
     }
-  }, [raw, availableUntil, plan]);
+  }, [raw, availableUntil, plan, savedCommitments]);
 
   const pickMimeType = (): string => {
     if (typeof MediaRecorder === "undefined") return "";
