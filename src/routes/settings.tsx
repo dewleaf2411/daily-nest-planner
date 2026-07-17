@@ -510,19 +510,17 @@ function CommitmentsSection({
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
-              <input
-                type="time"
+              <WheelTimePicker
                 value={form.start_time}
-                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                onChange={(v) => setForm({ ...form, start_time: v })}
+                ariaLabel="Start time"
               />
             </Field>
             <Field label="End">
-              <input
-                type="time"
+              <WheelTimePicker
                 value={form.end_time}
-                onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                onChange={(v) => setForm({ ...form, end_time: v })}
+                ariaLabel="End time"
               />
             </Field>
           </div>
