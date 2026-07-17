@@ -507,43 +507,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               </div>
               <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  {preferredName ? `Hi ${preferredName} — what's on your mind?` : "What's on your mind?"}
+                  {preferredName ? `Hi ${preferredName} — type or talk everything on your mind` : "Type or talk everything on your mind"}
                 </label>
-                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI pulls out what actually needs doing. Prefer to talk? Use your keyboard or system dictation (the mic key on most keyboards) and it'll type straight into the box.</p>
               </div>
-              {speechState !== "unsupported" && (
-                <button
-                  type="button"
-                  onClick={speechState === "recording" ? stopListening : startListening}
-                  disabled={speechState === "transcribing"}
-                  aria-label={speechState === "recording" ? "Stop voice input" : "Start voice input"}
-                  aria-pressed={speechState === "recording"}
-                  title={
-                    speechState === "denied"
-                      ? "Microphone access denied — enable it in your browser to try again"
-                      : speechState === "recording"
-                        ? "Recording… tap to stop and transcribe"
-                        : speechState === "transcribing"
-                          ? "Transcribing your recording…"
-                          : "Speak your thoughts"
-                  }
-                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-ring/50 ${
-                    speechState === "recording"
-                      ? "bg-priority-high text-priority-high-fg border-transparent animate-pulse"
-                      : speechState === "denied"
-                        ? "bg-background/60 text-muted-foreground border-border"
-                        : "bg-secondary text-primary border-border hover:bg-secondary/80 disabled:opacity-70"
-                  }`}
-                >
-                  {speechState === "transcribing" ? (
-                    <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.8} />
-                  ) : speechState === "denied" ? (
-                    <MicOff className="h-5 w-5" strokeWidth={1.8} />
-                  ) : (
-                    <Mic className="h-5 w-5" strokeWidth={1.8} />
-                  )}
-                </button>
-              )}
             </div>
 
             <textarea
@@ -555,36 +522,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            {speechState !== "unsupported" && (
-              <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
-                {speechState === "recording" ? (
-                  <>
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-priority-high-fg animate-pulse" />
-                    Recording… tap the mic to stop. Auto-stops after a few seconds of silence.
-                  </>
-                ) : speechState === "transcribing" ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Transcribing your recording…
-                  </>
-                ) : speechState === "denied" ? (
-                  <>
-                    <span>Mic blocked here.</span>
-                    <a
-                      href={typeof window !== "undefined" ? window.location.href : "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-2 text-foreground hover:text-primary"
-                    >
-                      Open in a new tab
-                    </a>
-                    <span>to allow the mic.</span>
-                  </>
-                ) : (
-                  <>Tap the mic, speak, then tap again — we'll transcribe it into the box.</>
-                )}
-              </p>
-            )}
 
 
 
