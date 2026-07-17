@@ -394,15 +394,23 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     };
     rec.onerror = (event: any) => {
       const err = event?.error;
+      console.error("[SpeechRecognition] error:", err, event);
       if (err === "not-allowed" || err === "service-not-allowed") {
         setSpeechState("denied");
         setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
       } else if (err === "no-speech" || err === "aborted") {
-        // benign
+        // benign — user was silent or we stopped it
+      } else if (err === "network") {
+        setError("Voice input needs an internet connection to transcribe. Check your connection and try again.");
+      } else if (err === "audio-capture") {
+        setError("No microphone was detected. Check that a mic is connected and not in use by another app.");
+      } else if (err === "language-not-supported") {
+        setError("This browser doesn't support English speech recognition here.");
       } else {
-        setError("Voice input hit a snag. Please try again.");
+        setError(`Voice input hit a snag (${err || "unknown"}). Please try again.`);
       }
     };
+
     rec.onend = () => {
       if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
       recognitionRef.current = null;
