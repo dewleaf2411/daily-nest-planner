@@ -289,86 +289,118 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   }, []);
 
 
-  const pickMimeType = (): string => {
-    if (typeof MediaRecorder === "undefined") return "";
-    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
-    for (const c of candidates) {
-      if (MediaRecorder.isTypeSupported(c)) return c;
-    }
-    return "";
+  // ---- Web Speech API ----
+  const getSpeechCtor = (): any => {
+    if (typeof window === "undefined") return null;
+    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
   };
 
-  const startRecording = useCallback(async () => {
+  useEffect(() => {
+    if (!getSpeechCtor()) setSpeechState("unsupported");
+  }, []);
+
+  const stopListening = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (rec) {
+      try { rec.stop(); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const armSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => { stopListening(); }, 5000);
+  }, [stopListening]);
+
+  const startListening = useCallback(async () => {
     setError(null);
+    const Ctor = getSpeechCtor();
+    if (!Ctor) { setSpeechState("unsupported"); return; }
+
+    // Request mic permission explicitly so we can distinguish denied vs unsupported.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickMimeType();
-      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
-        const type = recorder.mimeType || mime || "audio/webm";
-        const blob = new Blob(audioChunksRef.current, { type });
-        audioChunksRef.current = [];
-        if (blob.size < 1200) {
-          setError("That recording was too short — try again and speak for a few seconds.");
-          return;
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      setSpeechState("denied");
+      setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      return;
+    }
+
+    const rec: any = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+
+    // Prefer on-device recognition when supported.
+    try {
+      if ("processLocally" in rec) {
+        rec.processLocally = true;
+        const AR: any = (window as any).SpeechRecognition || Ctor;
+        if (AR && typeof AR.availableOnDevice === "function") {
+          const ok = await AR.availableOnDevice("en-US").catch(() => false);
+          if (!ok) rec.processLocally = false;
         }
-        setTranscribing(true);
-        try {
-          const buf = await blob.arrayBuffer();
-          // base64 encode
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-          }
-          const audioBase64 = btoa(binary);
-          const res = await transcribe({ data: { audioBase64, mimeType: type } });
-          const text = res.text.trim();
-          if (!text) {
-            setError("I couldn't hear anything in that recording. Try again?");
-          } else {
-            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
-            flashStatus("Added your voice note.");
-          }
-        } catch (err) {
-          console.error(err);
-          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setRecording(true);
-      setRecSeconds(0);
-      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+      }
+    } catch { /* fall back to cloud recognition */ }
+
+    baseTextRef.current = raw.trim().length > 0 ? raw.trimEnd() + "\n" : "";
+
+    rec.onstart = () => {
+      setSpeechState("listening");
+      armSilenceTimer();
+    };
+    rec.onresult = (event: any) => {
+      let interim = "";
+      let finalAdd = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        const txt = r[0]?.transcript ?? "";
+        if (r.isFinal) finalAdd += txt;
+        else interim += txt;
+      }
+      if (finalAdd) {
+        baseTextRef.current = (baseTextRef.current + finalAdd).replace(/\s+$/, "") + " ";
+      }
+      setRaw((baseTextRef.current + interim).trimStart());
+      armSilenceTimer();
+    };
+    rec.onerror = (event: any) => {
+      const err = event?.error;
+      if (err === "not-allowed" || err === "service-not-allowed") {
+        setSpeechState("denied");
+        setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      } else if (err === "no-speech" || err === "aborted") {
+        // benign
+      } else {
+        setError("Voice input hit a snag. Please try again.");
+      }
+    };
+    rec.onend = () => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      recognitionRef.current = null;
+      setSpeechState((s) => (s === "denied" || s === "unsupported" ? s : "idle"));
+    };
+
+    recognitionRef.current = rec;
+    try {
+      rec.start();
     } catch (err) {
       console.error(err);
-      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
+      setError("Couldn't start voice input. Please try again.");
+      recognitionRef.current = null;
+      setSpeechState("idle");
     }
-  }, [transcribe]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRecorderRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
-    mediaRecorderRef.current = null;
-    setRecording(false);
-  }, []);
+  }, [raw, armSilenceTimer]);
 
   useEffect(() => {
     return () => {
-      if (recTimerRef.current) clearInterval(recTimerRef.current);
-      const rec = mediaRecorderRef.current;
-      if (rec && rec.state !== "inactive") rec.stop();
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      const rec = recognitionRef.current;
+      if (rec) { try { rec.abort(); } catch { /* ignore */ } }
     };
   }, []);
+
 
 
   const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
