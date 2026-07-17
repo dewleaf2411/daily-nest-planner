@@ -118,8 +118,8 @@ interface CrowdedProposal {
 }
 
 function DailyNest({ isGuest }: { isGuest: boolean }) {
-  const navigate = useNavigate();
   const [raw, setRaw] = useState("");
+
   const [mode, setMode] = useState<InputMode>("type");
   const [guestUsed, setGuestUsed] = useState(false);
   const [showGuestCard, setShowGuestCard] = useState(false);
