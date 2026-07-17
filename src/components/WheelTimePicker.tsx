@@ -8,6 +8,7 @@ interface WheelTimePickerProps {
   onChange: (next: string) => void;
   className?: string;
   ariaLabel?: string;
+  id?: string;
 }
 
 const ITEM_H = 44;
@@ -109,7 +110,7 @@ function Column<T extends string | number>({
   );
 }
 
-export function WheelTimePicker({ value, onChange, className, ariaLabel }: WheelTimePickerProps) {
+export function WheelTimePicker({ value, onChange, className, ariaLabel, id }: WheelTimePickerProps) {
   const [open, setOpen] = useState(false);
   const parsed = parse24(value);
   const [h12, setH12] = useState(parsed.h12);
@@ -134,6 +135,7 @@ export function WheelTimePicker({ value, onChange, className, ariaLabel }: Wheel
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          id={id}
           type="button"
           aria-label={ariaLabel}
           className={`w-full inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground text-left outline-none focus:ring-2 focus:ring-primary/30 hover:bg-secondary/40 transition ${
