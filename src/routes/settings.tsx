@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Leaf, ArrowLeft, Plus, Trash2, Pencil, Check, X, Loader2, Calendar, Shield, LogOut, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { WheelTimePicker } from "@/components/WheelTimePicker";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsRoute,
