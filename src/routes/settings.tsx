@@ -8,6 +8,8 @@ export const Route = createFileRoute("/settings")({
 });
 
 type PlanningMode = "school" | "weekend" | "custom";
+// Planning mode is no longer user-selectable; DailyNest uses the current day/time,
+// the available-until time, fixed commitments, and free-text input.
 
 interface Profile {
   display_name: string | null;
@@ -71,7 +73,6 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
   const [status, setStatus] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [availableUntil, setAvailableUntil] = useState("22:00");
-  const [mode, setMode] = useState<PlanningMode>("custom");
   const [savingProfile, setSavingProfile] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -89,7 +90,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
       setProfile(prof);
       setDisplayName(prof.display_name ?? "");
       setAvailableUntil(prof.default_available_until);
-      setMode(prof.default_planning_mode);
+      // planning mode intentionally not surfaced in UI
       setCommitments((c ?? []) as unknown as Commitment[]);
       setLoading(false);
     };
@@ -107,7 +108,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
       id: user.id,
       display_name: displayName.trim() || null,
       default_available_until: availableUntil,
-      default_planning_mode: mode,
+      default_planning_mode: profile?.default_planning_mode ?? "custom",
     };
     const { error } = await supabase.from("profiles").upsert(payload);
     setSavingProfile(false);
@@ -126,8 +127,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
   const profileDirty =
     !profile ||
     (profile.display_name ?? "") !== displayName.trim() ||
-    profile.default_available_until !== availableUntil ||
-    profile.default_planning_mode !== mode;
+    profile.default_available_until !== availableUntil;
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -199,34 +199,14 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
 
             {/* Planning defaults */}
             <Section title="Planning defaults" subtitle="Optional — DailyNest has calm defaults.">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="Default “Available until”">
-                  <input
-                    type="time"
-                    value={availableUntil}
-                    onChange={(e) => setAvailableUntil(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </Field>
-                <Field label="Default planning mode">
-                  <div className="flex flex-wrap gap-2">
-                    {(["school", "weekend", "custom"] as PlanningMode[]).map((m) => (
-                      <button
-                        type="button"
-                        key={m}
-                        onClick={() => setMode(m)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium border transition ${
-                          mode === m
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border bg-card text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {m === "school" ? "School Day" : m === "weekend" ? "Weekend" : "Custom"}
-                      </button>
-                    ))}
-                  </div>
-                </Field>
-              </div>
+              <Field label="Default “Available until”">
+                <input
+                  type="time"
+                  value={availableUntil}
+                  onChange={(e) => setAvailableUntil(e.target.value)}
+                  className="w-full sm:max-w-xs rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </Field>
             </Section>
 
             {profileDirty && (
