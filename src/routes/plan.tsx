@@ -707,7 +707,19 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     Listening… tap the mic to stop. We'll auto-stop after 5s of silence.
                   </>
                 ) : speechState === "denied" ? (
-                  <>Microphone access is blocked. Enable it in your browser settings to use voice input.</>
+                  <>
+                    <span>Mic blocked here.</span>
+                    <a
+                      href={typeof window !== "undefined" ? window.location.href : "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2 text-foreground hover:text-primary"
+                    >
+                      Open in a new tab
+                    </a>
+                    <span>to allow the mic.</span>
+                  </>
+
                 ) : (
                   <>Tap the mic to dictate — your words appear as you speak, then you can edit.</>
                 )}
