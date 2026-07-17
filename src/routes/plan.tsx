@@ -509,7 +509,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
                   {preferredName ? `Hi ${preferredName} — type or talk everything on your mind` : "Type or talk everything on your mind"}
                 </label>
-                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI pulls out what actually needs doing. Prefer to talk? Use your keyboard or system dictation (the mic key on most keyboards) and it'll type straight into the box.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI pulls out what actually needs doing. Prefer to talk? Use your keyboard or system dictation!</p>
               </div>
             </div>
 
