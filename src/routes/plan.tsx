@@ -733,25 +733,30 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {speechState !== "unsupported" && (
                 <button
                   type="button"
-                  onClick={speechState === "listening" ? stopListening : startListening}
-                  aria-label={speechState === "listening" ? "Stop voice input" : "Start voice input"}
-                  aria-pressed={speechState === "listening"}
+                  onClick={speechState === "recording" ? stopListening : startListening}
+                  disabled={speechState === "transcribing"}
+                  aria-label={speechState === "recording" ? "Stop voice input" : "Start voice input"}
+                  aria-pressed={speechState === "recording"}
                   title={
                     speechState === "denied"
                       ? "Microphone access denied — enable it in your browser to try again"
-                      : speechState === "listening"
-                        ? "Listening… tap to stop"
-                        : "Speak your thoughts"
+                      : speechState === "recording"
+                        ? "Recording… tap to stop and transcribe"
+                        : speechState === "transcribing"
+                          ? "Transcribing your recording…"
+                          : "Speak your thoughts"
                   }
                   className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-ring/50 ${
-                    speechState === "listening"
+                    speechState === "recording"
                       ? "bg-priority-high text-priority-high-fg border-transparent animate-pulse"
                       : speechState === "denied"
                         ? "bg-background/60 text-muted-foreground border-border"
-                        : "bg-secondary text-primary border-border hover:bg-secondary/80"
+                        : "bg-secondary text-primary border-border hover:bg-secondary/80 disabled:opacity-70"
                   }`}
                 >
-                  {speechState === "denied" ? (
+                  {speechState === "transcribing" ? (
+                    <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.8} />
+                  ) : speechState === "denied" ? (
                     <MicOff className="h-5 w-5" strokeWidth={1.8} />
                   ) : (
                     <Mic className="h-5 w-5" strokeWidth={1.8} />
@@ -771,10 +776,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
             {speechState !== "unsupported" && (
               <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
-                {speechState === "listening" ? (
+                {speechState === "recording" ? (
                   <>
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-priority-high-fg animate-pulse" />
-                    Listening… tap the mic to stop. We'll auto-stop after 5s of silence.
+                    Recording… tap the mic to stop. Auto-stops after a few seconds of silence.
+                  </>
+                ) : speechState === "transcribing" ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Transcribing your recording…
                   </>
                 ) : speechState === "denied" ? (
                   <>
@@ -789,12 +799,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     </a>
                     <span>to allow the mic.</span>
                   </>
-
                 ) : (
-                  <>Tap the mic to dictate — your words appear as you speak, then you can edit.</>
+                  <>Tap the mic, speak, then tap again — we'll transcribe it into the box.</>
                 )}
               </p>
             )}
+
 
 
 
