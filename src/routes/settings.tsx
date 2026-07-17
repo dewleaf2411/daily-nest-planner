@@ -199,34 +199,14 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
 
             {/* Planning defaults */}
             <Section title="Planning defaults" subtitle="Optional — DailyNest has calm defaults.">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="Default “Available until”">
-                  <input
-                    type="time"
-                    value={availableUntil}
-                    onChange={(e) => setAvailableUntil(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </Field>
-                <Field label="Default planning mode">
-                  <div className="flex flex-wrap gap-2">
-                    {(["school", "weekend", "custom"] as PlanningMode[]).map((m) => (
-                      <button
-                        type="button"
-                        key={m}
-                        onClick={() => setMode(m)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium border transition ${
-                          mode === m
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border bg-card text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {m === "school" ? "School Day" : m === "weekend" ? "Weekend" : "Custom"}
-                      </button>
-                    ))}
-                  </div>
-                </Field>
-              </div>
+              <Field label="Default “Available until”">
+                <input
+                  type="time"
+                  value={availableUntil}
+                  onChange={(e) => setAvailableUntil(e.target.value)}
+                  className="w-full sm:max-w-xs rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </Field>
             </Section>
 
             {profileDirty && (
