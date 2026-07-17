@@ -13,7 +13,6 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PlanRouteImport } from './routes/plan'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -35,25 +34,18 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
-  id: '/api/transcribe',
-  path: '/api/transcribe',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/plan': typeof PlanRoute
   '/settings': typeof SettingsRoute
-  '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/plan': typeof PlanRoute
   '/settings': typeof SettingsRoute
-  '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,14 +53,13 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/plan': typeof PlanRoute
   '/settings': typeof SettingsRoute
-  '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/plan' | '/settings' | '/api/transcribe'
+  fullPaths: '/' | '/auth' | '/plan' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/plan' | '/settings' | '/api/transcribe'
-  id: '__root__' | '/' | '/auth' | '/plan' | '/settings' | '/api/transcribe'
+  to: '/' | '/auth' | '/plan' | '/settings'
+  id: '__root__' | '/' | '/auth' | '/plan' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,7 +67,6 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   PlanRoute: typeof PlanRoute
   SettingsRoute: typeof SettingsRoute
-  ApiTranscribeRoute: typeof ApiTranscribeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -109,13 +99,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/transcribe': {
-      id: '/api/transcribe'
-      path: '/api/transcribe'
-      fullPath: '/api/transcribe'
-      preLoaderRoute: typeof ApiTranscribeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -124,7 +107,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   PlanRoute: PlanRoute,
   SettingsRoute: SettingsRoute,
-  ApiTranscribeRoute: ApiTranscribeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
