@@ -73,7 +73,6 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
   const [status, setStatus] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [availableUntil, setAvailableUntil] = useState("22:00");
-  const [mode, setMode] = useState<PlanningMode>("custom");
   const [savingProfile, setSavingProfile] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
