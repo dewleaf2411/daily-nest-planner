@@ -542,7 +542,7 @@ function DailyNest() {
               </div>
               <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  What's on your mind?
+                  {preferredName ? `Hi ${preferredName} — what's on your mind?` : "What's on your mind?"}
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
               </div>
