@@ -49,7 +49,7 @@ const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant,
 
 Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
 
-type SpeechState = "idle" | "listening" | "denied" | "unsupported";
+type SpeechState = "idle" | "recording" | "transcribing" | "denied" | "unsupported";
 
 
 
@@ -128,9 +128,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   // Web Speech API state
   const [speechState, setSpeechState] = useState<SpeechState>("idle");
-  const recognitionRef = useRef<any>(null);
-  const baseTextRef = useRef<string>("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceRafRef = useRef<number | null>(null);
+  const speechStartRef = useRef<number>(0);
+
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -289,162 +295,218 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   }, []);
 
 
-  // ---- Web Speech API ----
-  const getSpeechCtor = (): any => {
-    if (typeof window === "undefined") return null;
-    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
-  };
-
+  // ---- Voice input via MediaRecorder + server-side Lovable AI transcription ----
   useEffect(() => {
-    if (!getSpeechCtor()) setSpeechState("unsupported");
+    const supported =
+      typeof window !== "undefined" &&
+      typeof (window as any).MediaRecorder !== "undefined" &&
+      !!navigator.mediaDevices?.getUserMedia;
+    if (!supported) setSpeechState("unsupported");
+  }, []);
+
+  const cleanupRecording = useCallback(() => {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (silenceRafRef.current != null) { cancelAnimationFrame(silenceRafRef.current); silenceRafRef.current = null; }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((t) => t.stop());
+      audioStreamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch { /* ignore */ }
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
   }, []);
 
   const stopListening = useCallback(() => {
-    const rec = recognitionRef.current;
+    const rec = recorderRef.current;
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
-    if (rec) {
+    if (silenceRafRef.current != null) { cancelAnimationFrame(silenceRafRef.current); silenceRafRef.current = null; }
+    if (rec && rec.state !== "inactive") {
       try { rec.stop(); } catch { /* ignore */ }
     }
   }, []);
 
-  const armSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    silenceTimerRef.current = setTimeout(() => { stopListening(); }, 5000);
-  }, [stopListening]);
-
   const startListening = useCallback(async () => {
     setError(null);
-    const Ctor = getSpeechCtor();
-    if (!Ctor) { setSpeechState("unsupported"); return; }
 
-    // Detect if we're inside an iframe whose Permission Policy blocks the mic.
-    // In that case the browser never shows a prompt — getUserMedia rejects immediately.
+    const supported =
+      typeof (window as any).MediaRecorder !== "undefined" &&
+      !!navigator.mediaDevices?.getUserMedia;
+    if (!supported) { setSpeechState("unsupported"); return; }
+
     const inIframe = typeof window !== "undefined" && window.self !== window.top;
+
+    // Fast-fail if the page's permission policy blocks the mic (preview iframe).
     try {
-      // featurePolicy / permissionsPolicy API — if present and mic isn't allowed here, bail early with a clear message.
       const fp: any = (document as any).featurePolicy || (document as any).permissionsPolicy;
       if (fp && typeof fp.allowsFeature === "function" && !fp.allowsFeature("microphone")) {
         setSpeechState("denied");
         setError(
           inIframe
             ? "This preview window isn't allowed to use the mic (no permission prompt will appear here). Open the app in a new tab to dictate."
-            : "Microphone access is blocked by this page's permission policy."
+            : "Microphone access is blocked by this page's permission policy.",
         );
         return;
       }
-    } catch { /* ignore and try getUserMedia */ }
+    } catch { /* ignore */ }
 
-    // Request mic permission explicitly so we can distinguish denied vs unsupported.
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (gumErr: any) {
+      console.error("[voice] getUserMedia failed:", gumErr);
       setSpeechState("denied");
       const msg = String(gumErr?.message || "");
       if (inIframe && (/permissions? policy/i.test(msg) || /disallowed/i.test(msg))) {
-        setError("This preview window isn't allowed to use the mic (no permission prompt will appear here). Open the app in a new tab to dictate.");
+        setError("This preview window isn't allowed to use the mic. Open the app in a new tab to dictate.");
       } else if (gumErr?.name === "NotAllowedError") {
-        setError("Microphone access was blocked. If you didn't see a prompt, this page (or the preview frame) isn't permitted to use the mic — try opening the app in a new tab.");
+        setError("Microphone access was blocked. If no prompt appeared, this page isn't permitted to use the mic — try opening the app in a new tab.");
       } else if (gumErr?.name === "NotFoundError") {
         setError("No microphone was found on this device.");
       } else {
-        setError("Couldn't access the microphone. Try opening the app in a new tab.");
+        setError("Couldn't access the microphone.");
       }
       return;
     }
+    audioStreamRef.current = stream;
 
+    // Pick a MIME type MediaRecorder supports on this browser.
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
+    const MR: any = (window as any).MediaRecorder;
+    const mimeType = candidates.find((m) => typeof MR.isTypeSupported === "function" && MR.isTypeSupported(m)) || undefined;
 
-    const rec: any = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-
-    // Prefer on-device recognition when supported.
+    let recorder: MediaRecorder;
     try {
-      if ("processLocally" in rec) {
-        rec.processLocally = true;
-        const AR: any = (window as any).SpeechRecognition || Ctor;
-        if (AR && typeof AR.availableOnDevice === "function") {
-          const ok = await AR.availableOnDevice("en-US").catch(() => false);
-          if (!ok) rec.processLocally = false;
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    } catch (e) {
+      console.error("[voice] MediaRecorder init failed:", e);
+      cleanupRecording();
+      setError("This browser can't record audio for transcription.");
+      setSpeechState("idle");
+      return;
+    }
+    recorderRef.current = recorder;
+    audioChunksRef.current = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+    };
+
+    recorder.onerror = (e: any) => {
+      console.error("[voice] MediaRecorder error:", e);
+      setError("Recording hit a snag. Please try again.");
+    };
+
+    recorder.onstop = async () => {
+      const chunks = audioChunksRef.current;
+      audioChunksRef.current = [];
+      const outType = recorder.mimeType || mimeType || "audio/webm";
+      cleanupRecording();
+
+      const totalBytes = chunks.reduce((n, c) => n + c.size, 0);
+      const duration = Date.now() - speechStartRef.current;
+      if (totalBytes < 1024 || duration < 400) {
+        setSpeechState("idle");
+        setError("That recording was too short — hold the mic and speak for a moment.");
+        return;
+      }
+
+      const blob = new Blob(chunks, { type: outType });
+      setSpeechState("transcribing");
+      try {
+        const form = new FormData();
+        form.append("file", blob, `recording.${outType.includes("mp4") ? "mp4" : outType.includes("mpeg") ? "mp3" : "webm"}`);
+        const res = await fetch("/api/transcribe", { method: "POST", body: form });
+        const json: any = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(json?.error || `Transcription failed (${res.status}).`);
+          setSpeechState("idle");
+          return;
         }
-      }
-    } catch { /* fall back to cloud recognition */ }
-
-    baseTextRef.current = raw.trim().length > 0 ? raw.trimEnd() + "\n" : "";
-
-    rec.onstart = () => {
-      setSpeechState("listening");
-      armSilenceTimer();
-    };
-    rec.onresult = (event: any) => {
-      let interim = "";
-      let finalAdd = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const r = event.results[i];
-        const txt = r[0]?.transcript ?? "";
-        if (r.isFinal) finalAdd += txt;
-        else interim += txt;
-      }
-      if (finalAdd) {
-        baseTextRef.current = (baseTextRef.current + finalAdd).replace(/\s+$/, "") + " ";
-      }
-      setRaw((baseTextRef.current + interim).trimStart());
-      armSilenceTimer();
-    };
-    rec.onerror = (event: any) => {
-      const err = event?.error;
-      console.error("[SpeechRecognition] error:", err, event);
-      if (err === "not-allowed" || err === "service-not-allowed") {
-        setSpeechState("denied");
-        setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
-      } else if (err === "no-speech" || err === "aborted") {
-        // benign — user was silent or we stopped it
-      } else if (err === "network") {
-        setError("Voice input needs an internet connection to transcribe. Check your connection and try again.");
-      } else if (err === "audio-capture") {
-        setError("No microphone was detected. Check that a mic is connected and not in use by another app.");
-      } else if (err === "language-not-supported") {
-        setError("This browser doesn't support English speech recognition here.");
-      } else {
-        setError(`Voice input hit a snag (${err || "unknown"}). Please try again.`);
-      }
-    };
-
-    rec.onend = () => {
-      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
-      recognitionRef.current = null;
-      setSpeechState((s) => (s === "denied" || s === "unsupported" ? s : "idle"));
-    };
-
-    recognitionRef.current = rec;
-    try {
-      rec.start();
-    } catch (err: any) {
-      console.error(err);
-      const msg = String(err?.message || "");
-      if (err?.name === "NotAllowedError" && /Permission Policy/i.test(msg)) {
-        setSpeechState("denied");
-        setError("Voice input is blocked inside this preview frame. Open the app in a new tab (or the published site) to use the mic.");
-      } else if (err?.name === "NotAllowedError") {
-        setSpeechState("denied");
-        setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
-      } else {
-        setError("Couldn't start voice input. Please try again.");
+        const text = String(json?.text || "").trim();
+        if (!text) {
+          setError("Couldn't hear any speech in that recording. Try again.");
+          setSpeechState("idle");
+          return;
+        }
+        setRaw((prev) => {
+          const base = prev.trim().length > 0 ? prev.trimEnd() + "\n" : "";
+          return base + text;
+        });
+        setSpeechState("idle");
+      } catch (err) {
+        console.error("[voice] upload failed:", err);
+        setError("Couldn't reach the transcription service. Check your connection and try again.");
         setSpeechState("idle");
       }
-      recognitionRef.current = null;
+    };
+
+    // Silence detection: watch volume, stop after ~2.5s below threshold.
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC) {
+        const ctx = new AC();
+        audioCtxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+        const data = new Uint8Array(analyser.fftSize);
+        let quietSince: number | null = null;
+        const SILENCE_MS = 2500;
+        const RMS_THRESHOLD = 0.015;
+        const tick = () => {
+          if (!analyserRef.current) return;
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) {
+            const v = (data[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / data.length);
+          const now = Date.now();
+          if (rms < RMS_THRESHOLD) {
+            if (quietSince == null) quietSince = now;
+            if (now - quietSince > SILENCE_MS && now - speechStartRef.current > 1200) {
+              stopListening();
+              return;
+            }
+          } else {
+            quietSince = null;
+          }
+          silenceRafRef.current = requestAnimationFrame(tick);
+        };
+        silenceRafRef.current = requestAnimationFrame(tick);
+      }
+    } catch (e) {
+      console.warn("[voice] silence detection unavailable:", e);
     }
 
-  }, [raw, armSilenceTimer]);
+    // Hard cap so a runaway recording can't grow unbounded.
+    silenceTimerRef.current = setTimeout(() => stopListening(), 60_000);
+
+    try {
+      speechStartRef.current = Date.now();
+      recorder.start();
+      setSpeechState("recording");
+    } catch (err) {
+      console.error("[voice] recorder.start failed:", err);
+      cleanupRecording();
+      setError("Couldn't start recording. Please try again.");
+      setSpeechState("idle");
+    }
+  }, [cleanupRecording, stopListening]);
 
   useEffect(() => {
     return () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      const rec = recognitionRef.current;
-      if (rec) { try { rec.abort(); } catch { /* ignore */ } }
+      const rec = recorderRef.current;
+      if (rec && rec.state !== "inactive") { try { rec.stop(); } catch { /* ignore */ } }
+      cleanupRecording();
     };
-  }, []);
+  }, [cleanupRecording]);
+
 
 
 
@@ -671,25 +733,30 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {speechState !== "unsupported" && (
                 <button
                   type="button"
-                  onClick={speechState === "listening" ? stopListening : startListening}
-                  aria-label={speechState === "listening" ? "Stop voice input" : "Start voice input"}
-                  aria-pressed={speechState === "listening"}
+                  onClick={speechState === "recording" ? stopListening : startListening}
+                  disabled={speechState === "transcribing"}
+                  aria-label={speechState === "recording" ? "Stop voice input" : "Start voice input"}
+                  aria-pressed={speechState === "recording"}
                   title={
                     speechState === "denied"
                       ? "Microphone access denied — enable it in your browser to try again"
-                      : speechState === "listening"
-                        ? "Listening… tap to stop"
-                        : "Speak your thoughts"
+                      : speechState === "recording"
+                        ? "Recording… tap to stop and transcribe"
+                        : speechState === "transcribing"
+                          ? "Transcribing your recording…"
+                          : "Speak your thoughts"
                   }
                   className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-ring/50 ${
-                    speechState === "listening"
+                    speechState === "recording"
                       ? "bg-priority-high text-priority-high-fg border-transparent animate-pulse"
                       : speechState === "denied"
                         ? "bg-background/60 text-muted-foreground border-border"
-                        : "bg-secondary text-primary border-border hover:bg-secondary/80"
+                        : "bg-secondary text-primary border-border hover:bg-secondary/80 disabled:opacity-70"
                   }`}
                 >
-                  {speechState === "denied" ? (
+                  {speechState === "transcribing" ? (
+                    <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.8} />
+                  ) : speechState === "denied" ? (
                     <MicOff className="h-5 w-5" strokeWidth={1.8} />
                   ) : (
                     <Mic className="h-5 w-5" strokeWidth={1.8} />
@@ -709,10 +776,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
             {speechState !== "unsupported" && (
               <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
-                {speechState === "listening" ? (
+                {speechState === "recording" ? (
                   <>
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-priority-high-fg animate-pulse" />
-                    Listening… tap the mic to stop. We'll auto-stop after 5s of silence.
+                    Recording… tap the mic to stop. Auto-stops after a few seconds of silence.
+                  </>
+                ) : speechState === "transcribing" ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Transcribing your recording…
                   </>
                 ) : speechState === "denied" ? (
                   <>
@@ -727,12 +799,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     </a>
                     <span>to allow the mic.</span>
                   </>
-
                 ) : (
-                  <>Tap the mic to dictate — your words appear as you speak, then you can edit.</>
+                  <>Tap the mic, speak, then tap again — we'll transcribe it into the box.</>
                 )}
               </p>
             )}
+
 
 
 
