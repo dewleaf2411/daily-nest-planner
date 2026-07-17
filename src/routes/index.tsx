@@ -93,7 +93,8 @@ function Landing() {
               Sign in
             </Link>
             <Link
-              to="/auth"
+              to="/plan"
+
               className="inline-flex items-center gap-2 rounded-full bg-primary text-primary-foreground px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
             >
               Get Started <ArrowRight className="w-4 h-4" />
