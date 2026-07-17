@@ -8,37 +8,30 @@ import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
+import { lovable } from "@/integrations/lovable/index";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
 });
 
+const GUEST_USED_KEY = "dailynest_guest_plan_used";
+
 function PlanRoute() {
-  const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!data.session);
       setChecked(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (!session) {
-        setAuthed(false);
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!session);
     });
     return () => sub.subscription.unsubscribe();
-  }, [navigate]);
+  }, []);
 
-  if (!checked || !authed) {
+  if (!checked) {
     return (
       <main className="min-h-screen w-full grid place-items-center">
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -48,8 +41,9 @@ function PlanRoute() {
     );
   }
 
-  return <DailyNest />;
+  return <DailyNest isGuest={!authed} />;
 }
+
 
 const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
 
@@ -123,9 +117,14 @@ interface CrowdedProposal {
   availableMin: number;
 }
 
-function DailyNest() {
+function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
+
   const [mode, setMode] = useState<InputMode>("type");
+  const [guestUsed, setGuestUsed] = useState(false);
+  const [showGuestCard, setShowGuestCard] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
@@ -149,8 +148,15 @@ function DailyNest() {
   const plan = useServerFn(planTasks);
   const transcribe = useServerFn(transcribeAudio);
 
-  // Load user defaults and commitments once
+  // Guest trial state from localStorage
   useEffect(() => {
+    if (!isGuest) { setGuestUsed(false); return; }
+    try { setGuestUsed(localStorage.getItem(GUEST_USED_KEY) === "1"); } catch { /* ignore */ }
+  }, [isGuest]);
+
+  // Load user defaults and commitments once (signed-in only)
+  useEffect(() => {
+    if (isGuest) return;
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
       const u = userData.user;
@@ -170,7 +176,8 @@ function DailyNest() {
       setPreferredName(finalName.split(/\s+/)[0] ?? "");
       setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
     })();
-  }, []);
+  }, [isGuest]);
+
 
 
   const nowMinutes = useMemo(() => {
@@ -205,6 +212,10 @@ function DailyNest() {
       setError("Type or record what's on your mind, then make your plan.");
       return;
     }
+    if (isGuest && guestUsed) {
+      setShowGuestCard(true);
+      return;
+    }
     setLoading(true);
     try {
       const res = await plan({
@@ -215,6 +226,7 @@ function DailyNest() {
           availableUntil,
         },
       });
+
       // Inject enabled fixed commitments for today as locked items
       const todayDow = new Date().getDay();
       const nextIdx = res.items.reduce((m, it) => Math.max(m, it.originalIndex), -1) + 1;
@@ -244,13 +256,39 @@ function DailyNest() {
       setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
+      if (isGuest) {
+        try { localStorage.setItem(GUEST_USED_KEY, "1"); } catch { /* ignore */ }
+        setGuestUsed(true);
+        setShowGuestCard(true);
+      }
     } catch (err) {
       console.error(err);
       setError("Something went wrong while making your plan. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [raw, availableUntil, plan, savedCommitments]);
+  }, [raw, availableUntil, plan, savedCommitments, isGuest, guestUsed]);
+
+  const onGuestGoogle = useCallback(async () => {
+    setOauthLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin + "/plan",
+      });
+      if (result.error) {
+        setError(result.error.message || "Sign in failed. Please try again.");
+        setOauthLoading(false);
+        return;
+      }
+      if (result.redirected) return;
+      setShowGuestCard(false);
+      setOauthLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign in failed.");
+      setOauthLoading(false);
+    }
+  }, []);
+
 
   const pickMimeType = (): string => {
     if (typeof MediaRecorder === "undefined") return "";
@@ -523,7 +561,15 @@ function DailyNest() {
               </div>
               <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
             </div>
-            <ProfileMenu />
+            {isGuest ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 backdrop-blur-sm px-3 py-1.5 text-sm text-muted-foreground">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-secondary text-primary text-[10px] font-medium">G</span>
+                Guest
+              </span>
+            ) : (
+              <ProfileMenu />
+            )}
+
           </div>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
@@ -1043,6 +1089,46 @@ function DailyNest() {
           </div>
         </div>
       )}
+
+      {isGuest && showGuestCard && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-[0_20px_60px_-24px_rgba(30,60,45,0.35)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-secondary text-primary">
+                <Leaf className="h-5 w-5" strokeWidth={1.5} />
+              </div>
+              <h3 className="font-serif text-2xl text-foreground leading-tight">Keep your DailyNest going</h3>
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+              Sign in to create more plans and save your schedule, weekly commitments, and preferences.
+            </p>
+            <div className="mt-6 space-y-2.5">
+              <button
+                type="button"
+                onClick={onGuestGoogle}
+                disabled={oauthLoading}
+                className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium text-foreground hover:bg-secondary/60 transition disabled:opacity-60"
+              >
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.3-.3-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 16.1 4.5 9.3 8.9 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 43.5c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.4-4.5 2.2-7.2 2.2-5.2 0-9.6-3.3-11.2-8l-6.5 5C9.2 39 16 43.5 24 43.5z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.2-.1-2.3-.4-3.5z"/>
+                </svg>
+                {oauthLoading ? "Signing in…" : "Continue with Google"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowGuestCard(false)}
+                className="w-full rounded-full px-5 py-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition"
+              >
+                View this plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+
   );
 }
