@@ -126,16 +126,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [showGuestCard, setShowGuestCard] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
 
-  // Web Speech API state
-  const [speechState, setSpeechState] = useState<SpeechState>("idle");
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const silenceRafRef = useRef<number | null>(null);
-  const speechStartRef = useRef<number>(0);
+  // Voice input removed — users can use their OS/keyboard dictation to type into the textarea.
+
 
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
