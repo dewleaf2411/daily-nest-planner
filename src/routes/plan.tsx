@@ -148,8 +148,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const plan = useServerFn(planTasks);
   const transcribe = useServerFn(transcribeAudio);
 
-  // Load user defaults and commitments once
+  // Guest trial state from localStorage
   useEffect(() => {
+    if (!isGuest) { setGuestUsed(false); return; }
+    try { setGuestUsed(localStorage.getItem(GUEST_USED_KEY) === "1"); } catch { /* ignore */ }
+  }, [isGuest]);
+
+  // Load user defaults and commitments once (signed-in only)
+  useEffect(() => {
+    if (isGuest) return;
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
       const u = userData.user;
@@ -169,7 +176,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       setPreferredName(finalName.split(/\s+/)[0] ?? "");
       setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
     })();
-  }, []);
+  }, [isGuest]);
+
 
 
   const nowMinutes = useMemo(() => {
