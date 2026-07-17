@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Leaf, ArrowLeft, Plus, Trash2, Pencil, Check, X, Loader2, Calendar, Shield, LogOut, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { WheelTimePicker } from "@/components/WheelTimePicker";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsRoute,
@@ -200,12 +201,13 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
             {/* Planning defaults */}
             <Section title="Planning defaults" subtitle="Optional — DailyNest has calm defaults.">
               <Field label="Default “Available until”">
-                <input
-                  type="time"
-                  value={availableUntil}
-                  onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="w-full sm:max-w-xs rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                />
+                <div className="w-full sm:max-w-xs">
+                  <WheelTimePicker
+                    value={availableUntil}
+                    onChange={setAvailableUntil}
+                    ariaLabel="Default available until time"
+                  />
+                </div>
               </Field>
             </Section>
 
@@ -508,19 +510,17 @@ function CommitmentsSection({
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
-              <input
-                type="time"
+              <WheelTimePicker
                 value={form.start_time}
-                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                onChange={(v) => setForm({ ...form, start_time: v })}
+                ariaLabel="Start time"
               />
             </Field>
             <Field label="End">
-              <input
-                type="time"
+              <WheelTimePicker
                 value={form.end_time}
-                onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                onChange={(v) => setForm({ ...form, end_time: v })}
+                ariaLabel="End time"
               />
             </Field>
           </div>
