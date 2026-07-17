@@ -93,7 +93,8 @@ function Landing() {
               Sign in
             </Link>
             <Link
-              to="/auth"
+              to="/plan"
+
               className="inline-flex items-center gap-2 rounded-full bg-primary text-primary-foreground px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
             >
               Get Started <ArrowRight className="w-4 h-4" />
@@ -149,7 +150,8 @@ function Landing() {
           </div>
           <div data-reveal data-reveal-delay="3" className="mt-8">
             <Link
-              to="/auth"
+              to="/plan"
+
               className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-8 py-4 text-base font-medium shadow-2xl hover:opacity-95 transition"
             >
               Get Started
@@ -357,7 +359,8 @@ function Landing() {
           <div data-reveal data-reveal-delay="2" className="mt-12 flex flex-col items-center gap-3">
             <Sprout className="w-5 h-5 text-primary" />
             <Link
-              to="/auth"
+              to="/plan"
+
               className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-10 py-5 text-lg font-medium shadow-xl hover:opacity-95 transition"
             >
               Get Started

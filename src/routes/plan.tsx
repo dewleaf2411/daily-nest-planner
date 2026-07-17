@@ -1,44 +1,37 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
-import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
+import { WheelTimePicker } from "@/components/WheelTimePicker";
+import { lovable } from "@/integrations/lovable/index";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
 });
 
+const GUEST_USED_KEY = "dailynest_guest_plan_used";
+
 function PlanRoute() {
-  const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!data.session);
       setChecked(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (!session) {
-        setAuthed(false);
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!session);
     });
     return () => sub.subscription.unsubscribe();
-  }, [navigate]);
+  }, []);
 
-  if (!checked || !authed) {
+  if (!checked) {
     return (
       <main className="min-h-screen w-full grid place-items-center">
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -48,14 +41,17 @@ function PlanRoute() {
     );
   }
 
-  return <DailyNest />;
+  return <DailyNest isGuest={!authed} />;
 }
+
 
 const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
 
 Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
 
-type InputMode = "type" | "voice";
+
+
+
 
 
 function hhmmToMinutes(s: string): number {
@@ -133,15 +129,16 @@ interface CrowdedProposal {
   availableMin: number;
 }
 
-function DailyNest() {
+function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
-  const [mode, setMode] = useState<InputMode>("type");
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [guestUsed, setGuestUsed] = useState(false);
+  const [showGuestCard, setShowGuestCard] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+
+  // Voice input removed — users can use their OS/keyboard dictation to type into the textarea.
+
+
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,10 +150,42 @@ function DailyNest() {
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [planNowMinutes, setPlanNowMinutes] = useState<number | null>(null);
+  const [savedCommitments, setSavedCommitments] = useState<Array<{ id: string; name: string; days_of_week: number[]; start_time: string; end_time: string; enabled: boolean }>>([]);
+  const [preferredName, setPreferredName] = useState<string>("");
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
-  const transcribe = useServerFn(transcribeAudio);
+
+  // Guest trial state from localStorage
+  useEffect(() => {
+    if (!isGuest) { setGuestUsed(false); return; }
+    try { setGuestUsed(localStorage.getItem(GUEST_USED_KEY) === "1"); } catch { /* ignore */ }
+  }, [isGuest]);
+
+  // Load user defaults and commitments once (signed-in only)
+  useEffect(() => {
+    if (isGuest) return;
+    (async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const u = userData.user;
+      if (!u) return;
+      const uid = u.id;
+      const [{ data: p }, { data: c }] = await Promise.all([
+        supabase.from("profiles").select("default_available_until, display_name").eq("id", uid).maybeSingle(),
+        supabase.from("fixed_commitments").select("*").eq("user_id", uid).eq("enabled", true),
+      ]);
+      if (p?.default_available_until) setAvailableUntil(p.default_available_until as string);
+      const preferred = (p?.display_name as string | null | undefined)?.trim();
+      const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fallback =
+        (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "";
+      const finalName = preferred && preferred.length > 0 ? preferred : fallback;
+      // Use just the first name for a friendlier greeting.
+      setPreferredName(finalName.split(/\s+/)[0] ?? "");
+      setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
+    })();
+  }, [isGuest]);
+
 
 
   const liveNowMinutes = useMemo(() => {
@@ -192,6 +221,10 @@ function DailyNest() {
       setError("Type or record what's on your mind, then make your plan.");
       return;
     }
+    if (isGuest && guestUsed) {
+      setShowGuestCard(true);
+      return;
+    }
     setLoading(true);
     try {
       const submittedAt = new Date();
@@ -204,97 +237,74 @@ function DailyNest() {
         },
       });
       setPlanNowMinutes(submittedAt.getHours() * 60 + submittedAt.getMinutes());
-      setItems(res.items);
+      setPlanNowMinutes(submittedAt.getHours() * 60 + submittedAt.getMinutes());
+
+      // Inject enabled fixed commitments for today as locked items
+      const todayDow = new Date().getDay();
+      const nextIdx = res.items.reduce((m, it) => Math.max(m, it.originalIndex), -1) + 1;
+      const commitmentItems: PlanItem[] = savedCommitments
+        .filter((c) => c.enabled && c.days_of_week.includes(todayDow))
+        .map((c, i) => {
+          const [sh, sm] = c.start_time.split(":").map((n) => parseInt(n, 10));
+          const [eh, em] = c.end_time.split(":").map((n) => parseInt(n, 10));
+          const duration = Math.max(5, (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0)));
+          return {
+            originalIndex: nextIdx + i,
+            title: c.name,
+            durationMinutes: duration,
+            priority: "high",
+            requiredToday: false,
+            reason: "Weekly commitment",
+            dueDate: null,
+            dueLabel: null,
+            dueCategory: "none",
+            suggestedDay: "today",
+            isFixed: true,
+            fixedStart: c.start_time,
+            fixedEnd: c.end_time,
+            focusBlockMinutes: null,
+            note: null,
+          };
+        });
+      setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
+      if (isGuest) {
+        try { localStorage.setItem(GUEST_USED_KEY, "1"); } catch { /* ignore */ }
+        setGuestUsed(true);
+        setShowGuestCard(true);
+      }
     } catch (err) {
       console.error(err);
       setError("Something went wrong while making your plan. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [raw, availableUntil, plan]);
+  }, [raw, availableUntil, plan, savedCommitments, isGuest, guestUsed]);
 
-  const pickMimeType = (): string => {
-    if (typeof MediaRecorder === "undefined") return "";
-    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
-    for (const c of candidates) {
-      if (MediaRecorder.isTypeSupported(c)) return c;
-    }
-    return "";
-  };
-
-  const startRecording = useCallback(async () => {
-    setError(null);
+  const onGuestGoogle = useCallback(async () => {
+    setOauthLoading(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickMimeType();
-      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
-        const type = recorder.mimeType || mime || "audio/webm";
-        const blob = new Blob(audioChunksRef.current, { type });
-        audioChunksRef.current = [];
-        if (blob.size < 1200) {
-          setError("That recording was too short — try again and speak for a few seconds.");
-          return;
-        }
-        setTranscribing(true);
-        try {
-          const buf = await blob.arrayBuffer();
-          // base64 encode
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-          }
-          const audioBase64 = btoa(binary);
-          const res = await transcribe({ data: { audioBase64, mimeType: type } });
-          const text = res.text.trim();
-          if (!text) {
-            setError("I couldn't hear anything in that recording. Try again?");
-          } else {
-            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
-            flashStatus("Added your voice note.");
-          }
-        } catch (err) {
-          console.error(err);
-          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setRecording(true);
-      setRecSeconds(0);
-      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
-    } catch (err) {
-      console.error(err);
-      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin + "/plan",
+      });
+      if (result.error) {
+        setError(result.error.message || "Sign in failed. Please try again.");
+        setOauthLoading(false);
+        return;
+      }
+      if (result.redirected) return;
+      setShowGuestCard(false);
+      setOauthLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign in failed.");
+      setOauthLoading(false);
     }
-  }, [transcribe]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRecorderRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
-    mediaRecorderRef.current = null;
-    setRecording(false);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (recTimerRef.current) clearInterval(recTimerRef.current);
-      const rec = mediaRecorderRef.current;
-      if (rec && rec.state !== "inactive") rec.stop();
-    };
-  }, []);
+
+
+
 
 
   const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
@@ -486,7 +496,15 @@ function DailyNest() {
               </div>
               <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
             </div>
-            <ProfileMenu />
+            {isGuest ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 backdrop-blur-sm px-3 py-1.5 text-sm text-muted-foreground">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-secondary text-primary text-[10px] font-medium">G</span>
+                Guest
+              </span>
+            ) : (
+              <ProfileMenu />
+            )}
+
           </div>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
@@ -505,29 +523,9 @@ function DailyNest() {
               </div>
               <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  What's on your mind?
+                  {preferredName ? `Hi ${preferredName} — type or talk everything on your mind` : "Type or talk everything on your mind"}
                 </label>
-                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
-              </div>
-              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "type"}
-                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "voice"}
-                  onClick={() => setMode("voice")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
-                </button>
+                <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI pulls out what actually needs doing. Prefer to talk? Use your keyboard or system dictation!</p>
               </div>
             </div>
 
@@ -536,34 +534,12 @@ function DailyNest() {
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
-              rows={mode === "voice" ? 5 : 8}
+              rows={8}
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            {mode === "voice" && (
-              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
-                <button
-                  type="button"
-                  onClick={recording ? stopRecording : startRecording}
-                  disabled={transcribing}
-                  aria-label={recording ? "Stop recording" : "Start recording"}
-                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
-                    recording
-                      ? "bg-priority-high text-priority-high-fg animate-pulse"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  }`}
-                >
-                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  {transcribing
-                    ? "Transcribing your voice note…"
-                    : recording
-                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
-                      : "Tap the mic and just talk. We'll add it to your notes above."}
-                </p>
-              </div>
-            )}
+
+
 
 
             <div className="my-6 h-px bg-border/70" />
@@ -581,17 +557,13 @@ function DailyNest() {
             </div>
 
             <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="relative w-full sm:w-56">
-                <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-                <input
-                  id="until"
-                  type="time"
-                  value={availableUntil}
-                  onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background/70 pl-9 pr-9 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-                />
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-              </div>
+              <WheelTimePicker
+                id="until"
+                value={availableUntil}
+                onChange={setAvailableUntil}
+                ariaLabel="Available until"
+                className="w-full sm:w-56"
+              />
               <button
                 type="submit"
                 disabled={loading}
@@ -1012,6 +984,46 @@ function DailyNest() {
           </div>
         </div>
       )}
+
+      {isGuest && showGuestCard && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-[0_20px_60px_-24px_rgba(30,60,45,0.35)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-secondary text-primary">
+                <Leaf className="h-5 w-5" strokeWidth={1.5} />
+              </div>
+              <h3 className="font-serif text-2xl text-foreground leading-tight">Keep your DailyNest going</h3>
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+              Sign in to create more plans and save your schedule, weekly commitments, and preferences.
+            </p>
+            <div className="mt-6 space-y-2.5">
+              <button
+                type="button"
+                onClick={onGuestGoogle}
+                disabled={oauthLoading}
+                className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium text-foreground hover:bg-secondary/60 transition disabled:opacity-60"
+              >
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.3-.3-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 16.1 4.5 9.3 8.9 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 43.5c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.4-4.5 2.2-7.2 2.2-5.2 0-9.6-3.3-11.2-8l-6.5 5C9.2 39 16 43.5 24 43.5z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.2-.1-2.3-.4-3.5z"/>
+                </svg>
+                {oauthLoading ? "Signing in…" : "Continue with Google"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowGuestCard(false)}
+                className="w-full rounded-full px-5 py-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition"
+              >
+                View this plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+
   );
 }

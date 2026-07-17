@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
+import { useNavigate, Link } from "@tanstack/react-router";
+import { LogOut, Settings } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Profile {
@@ -24,8 +24,16 @@ export function ProfileMenu() {
         return;
       }
       const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fallbackName =
+        (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "You";
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", u.id)
+        .maybeSingle();
+      const preferred = (prof?.display_name as string | null | undefined)?.trim();
       setProfile({
-        name: (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "You",
+        name: preferred && preferred.length > 0 ? preferred : fallbackName,
         email: u.email ?? "",
         avatarUrl: (meta.avatar_url as string) || (meta.picture as string) || null,
       });
@@ -104,10 +112,18 @@ export function ProfileMenu() {
               )}
             </div>
           </div>
+          <Link
+            to="/settings"
+            onClick={() => setOpen(false)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition"
+          >
+            <Settings className="h-4 w-4" />
+            Profile & Settings
+          </Link>
           <button
             type="button"
             onClick={signOut}
-            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition"
+            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition border-t border-border"
           >
             <LogOut className="h-4 w-4" />
             Sign out
