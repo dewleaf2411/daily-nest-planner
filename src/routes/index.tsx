@@ -150,7 +150,8 @@ function Landing() {
           </div>
           <div data-reveal data-reveal-delay="3" className="mt-8">
             <Link
-              to="/auth"
+              to="/plan"
+
               className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-8 py-4 text-base font-medium shadow-2xl hover:opacity-95 transition"
             >
               Get Started
