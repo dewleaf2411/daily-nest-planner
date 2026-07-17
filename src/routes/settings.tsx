@@ -108,7 +108,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
       id: user.id,
       display_name: displayName.trim() || null,
       default_available_until: availableUntil,
-      default_planning_mode: mode,
+      default_planning_mode: profile?.default_planning_mode ?? "custom",
     };
     const { error } = await supabase.from("profiles").upsert(payload);
     setSavingProfile(false);
