@@ -206,7 +206,33 @@ function DailyNest() {
           availableUntil,
         },
       });
-      setItems(res.items);
+      // Inject enabled fixed commitments for today as locked items
+      const todayDow = new Date().getDay();
+      const nextIdx = res.items.reduce((m, it) => Math.max(m, it.originalIndex), -1) + 1;
+      const commitmentItems: PlanItem[] = savedCommitments
+        .filter((c) => c.enabled && c.days_of_week.includes(todayDow))
+        .map((c, i) => {
+          const [sh, sm] = c.start_time.split(":").map((n) => parseInt(n, 10));
+          const [eh, em] = c.end_time.split(":").map((n) => parseInt(n, 10));
+          const duration = Math.max(5, (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0)));
+          return {
+            originalIndex: nextIdx + i,
+            title: c.name,
+            durationMinutes: duration,
+            priority: "high",
+            reason: "Weekly commitment",
+            dueDate: null,
+            dueLabel: null,
+            dueCategory: "none",
+            suggestedDay: "today",
+            isFixed: true,
+            fixedStart: c.start_time,
+            fixedEnd: c.end_time,
+            focusBlockMinutes: null,
+            note: null,
+          };
+        });
+      setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
     } catch (err) {
