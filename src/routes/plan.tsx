@@ -212,6 +212,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       setError("Type or record what's on your mind, then make your plan.");
       return;
     }
+    if (isGuest && guestUsed) {
+      setShowGuestCard(true);
+      return;
+    }
     setLoading(true);
     try {
       const res = await plan({
@@ -222,6 +226,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           availableUntil,
         },
       });
+
       // Inject enabled fixed commitments for today as locked items
       const todayDow = new Date().getDay();
       const nextIdx = res.items.reduce((m, it) => Math.max(m, it.originalIndex), -1) + 1;
