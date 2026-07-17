@@ -135,6 +135,7 @@ export function WheelTimePicker({ value, onChange, className, ariaLabel, id }: W
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          id={id}
           type="button"
           aria-label={ariaLabel}
           className={`w-full inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground text-left outline-none focus:ring-2 focus:ring-primary/30 hover:bg-secondary/40 transition ${
