@@ -8,6 +8,8 @@ export const Route = createFileRoute("/settings")({
 });
 
 type PlanningMode = "school" | "weekend" | "custom";
+// Planning mode is no longer user-selectable; DailyNest uses the current day/time,
+// the available-until time, fixed commitments, and free-text input.
 
 interface Profile {
   display_name: string | null;
