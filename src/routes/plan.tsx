@@ -49,7 +49,9 @@ const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant,
 
 Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
 
-type InputMode = "type" | "voice";
+type SpeechState = "idle" | "listening" | "denied" | "unsupported";
+
+
 
 
 function hhmmToMinutes(s: string): number {
