@@ -1,9 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, Square, Keyboard, Loader2 } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Mic, MicOff, Loader2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
-import { transcribeAudio } from "@/lib/transcribe.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,7 +49,9 @@ const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant,
 
 Ugh today is so much. Rent is due soon and I still haven't paid it. I need to call the dentist at some point, and there's that form due Friday. Also want to grab snacks tomorrow. I'm just tired.`;
 
-type InputMode = "type" | "voice";
+type SpeechState = "idle" | "listening" | "denied" | "unsupported";
+
+
 
 
 function hhmmToMinutes(s: string): number {
@@ -121,17 +122,15 @@ interface CrowdedProposal {
 function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
 
-  const [mode, setMode] = useState<InputMode>("type");
   const [guestUsed, setGuestUsed] = useState(false);
   const [showGuestCard, setShowGuestCard] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
 
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Web Speech API state
+  const [speechState, setSpeechState] = useState<SpeechState>("idle");
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef<string>("");
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +146,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
-  const transcribe = useServerFn(transcribeAudio);
 
   // Guest trial state from localStorage
   useEffect(() => {
@@ -291,86 +289,118 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   }, []);
 
 
-  const pickMimeType = (): string => {
-    if (typeof MediaRecorder === "undefined") return "";
-    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/mpeg"];
-    for (const c of candidates) {
-      if (MediaRecorder.isTypeSupported(c)) return c;
-    }
-    return "";
+  // ---- Web Speech API ----
+  const getSpeechCtor = (): any => {
+    if (typeof window === "undefined") return null;
+    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
   };
 
-  const startRecording = useCallback(async () => {
+  useEffect(() => {
+    if (!getSpeechCtor()) setSpeechState("unsupported");
+  }, []);
+
+  const stopListening = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (rec) {
+      try { rec.stop(); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const armSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => { stopListening(); }, 5000);
+  }, [stopListening]);
+
+  const startListening = useCallback(async () => {
     setError(null);
+    const Ctor = getSpeechCtor();
+    if (!Ctor) { setSpeechState("unsupported"); return; }
+
+    // Request mic permission explicitly so we can distinguish denied vs unsupported.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickMimeType();
-      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
-        const type = recorder.mimeType || mime || "audio/webm";
-        const blob = new Blob(audioChunksRef.current, { type });
-        audioChunksRef.current = [];
-        if (blob.size < 1200) {
-          setError("That recording was too short — try again and speak for a few seconds.");
-          return;
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      setSpeechState("denied");
+      setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      return;
+    }
+
+    const rec: any = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+
+    // Prefer on-device recognition when supported.
+    try {
+      if ("processLocally" in rec) {
+        rec.processLocally = true;
+        const AR: any = (window as any).SpeechRecognition || Ctor;
+        if (AR && typeof AR.availableOnDevice === "function") {
+          const ok = await AR.availableOnDevice("en-US").catch(() => false);
+          if (!ok) rec.processLocally = false;
         }
-        setTranscribing(true);
-        try {
-          const buf = await blob.arrayBuffer();
-          // base64 encode
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-          }
-          const audioBase64 = btoa(binary);
-          const res = await transcribe({ data: { audioBase64, mimeType: type } });
-          const text = res.text.trim();
-          if (!text) {
-            setError("I couldn't hear anything in that recording. Try again?");
-          } else {
-            setRaw((prev) => (prev.trim() ? prev.trim() + "\n" + text : text));
-            flashStatus("Added your voice note.");
-          }
-        } catch (err) {
-          console.error(err);
-          setError(err instanceof Error ? err.message : "Transcription failed. Please try again.");
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setRecording(true);
-      setRecSeconds(0);
-      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+      }
+    } catch { /* fall back to cloud recognition */ }
+
+    baseTextRef.current = raw.trim().length > 0 ? raw.trimEnd() + "\n" : "";
+
+    rec.onstart = () => {
+      setSpeechState("listening");
+      armSilenceTimer();
+    };
+    rec.onresult = (event: any) => {
+      let interim = "";
+      let finalAdd = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        const txt = r[0]?.transcript ?? "";
+        if (r.isFinal) finalAdd += txt;
+        else interim += txt;
+      }
+      if (finalAdd) {
+        baseTextRef.current = (baseTextRef.current + finalAdd).replace(/\s+$/, "") + " ";
+      }
+      setRaw((baseTextRef.current + interim).trimStart());
+      armSilenceTimer();
+    };
+    rec.onerror = (event: any) => {
+      const err = event?.error;
+      if (err === "not-allowed" || err === "service-not-allowed") {
+        setSpeechState("denied");
+        setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      } else if (err === "no-speech" || err === "aborted") {
+        // benign
+      } else {
+        setError("Voice input hit a snag. Please try again.");
+      }
+    };
+    rec.onend = () => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      recognitionRef.current = null;
+      setSpeechState((s) => (s === "denied" || s === "unsupported" ? s : "idle"));
+    };
+
+    recognitionRef.current = rec;
+    try {
+      rec.start();
     } catch (err) {
       console.error(err);
-      setError("Microphone access was blocked. Enable it in your browser to use voice input.");
+      setError("Couldn't start voice input. Please try again.");
+      recognitionRef.current = null;
+      setSpeechState("idle");
     }
-  }, [transcribe]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRecorderRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
-    mediaRecorderRef.current = null;
-    setRecording(false);
-  }, []);
+  }, [raw, armSilenceTimer]);
 
   useEffect(() => {
     return () => {
-      if (recTimerRef.current) clearInterval(recTimerRef.current);
-      const rec = mediaRecorderRef.current;
-      if (rec && rec.state !== "inactive") rec.stop();
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      const rec = recognitionRef.current;
+      if (rec) { try { rec.abort(); } catch { /* ignore */ } }
     };
   }, []);
+
 
 
   const updateItems = (updater: (prev: PlanItem[]) => PlanItem[]) => {
@@ -593,26 +623,34 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
               </div>
-              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
+              {speechState !== "unsupported" && (
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={mode === "type"}
-                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={speechState === "listening" ? stopListening : startListening}
+                  aria-label={speechState === "listening" ? "Stop voice input" : "Start voice input"}
+                  aria-pressed={speechState === "listening"}
+                  title={
+                    speechState === "denied"
+                      ? "Microphone access denied — enable it in your browser to try again"
+                      : speechState === "listening"
+                        ? "Listening… tap to stop"
+                        : "Speak your thoughts"
+                  }
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-ring/50 ${
+                    speechState === "listening"
+                      ? "bg-priority-high text-priority-high-fg border-transparent animate-pulse"
+                      : speechState === "denied"
+                        ? "bg-background/60 text-muted-foreground border-border"
+                        : "bg-secondary text-primary border-border hover:bg-secondary/80"
+                  }`}
                 >
-                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
+                  {speechState === "denied" ? (
+                    <MicOff className="h-5 w-5" strokeWidth={1.8} />
+                  ) : (
+                    <Mic className="h-5 w-5" strokeWidth={1.8} />
+                  )}
                 </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "voice"}
-                  onClick={() => setMode("voice")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
-                </button>
-              </div>
+              )}
             </div>
 
             <textarea
@@ -620,34 +658,25 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
-              rows={mode === "voice" ? 5 : 8}
+              rows={8}
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            {mode === "voice" && (
-              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
-                <button
-                  type="button"
-                  onClick={recording ? stopRecording : startRecording}
-                  disabled={transcribing}
-                  aria-label={recording ? "Stop recording" : "Start recording"}
-                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
-                    recording
-                      ? "bg-priority-high text-priority-high-fg animate-pulse"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  }`}
-                >
-                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  {transcribing
-                    ? "Transcribing your voice note…"
-                    : recording
-                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
-                      : "Tap the mic and just talk. We'll add it to your notes above."}
-                </p>
-              </div>
+            {speechState !== "unsupported" && (
+              <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                {speechState === "listening" ? (
+                  <>
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-priority-high-fg animate-pulse" />
+                    Listening… tap the mic to stop. We'll auto-stop after 5s of silence.
+                  </>
+                ) : speechState === "denied" ? (
+                  <>Microphone access is blocked. Enable it in your browser settings to use voice input.</>
+                ) : (
+                  <>Tap the mic to dictate — your words appear as you speak, then you can edit.</>
+                )}
+              </p>
             )}
+
 
 
             <div className="my-6 h-px bg-border/70" />
