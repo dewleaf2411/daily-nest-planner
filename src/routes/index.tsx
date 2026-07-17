@@ -359,7 +359,8 @@ function Landing() {
           <div data-reveal data-reveal-delay="2" className="mt-12 flex flex-col items-center gap-3">
             <Sprout className="w-5 h-5 text-primary" />
             <Link
-              to="/auth"
+              to="/plan"
+
               className="group inline-flex items-center gap-3 rounded-full bg-primary text-primary-foreground px-10 py-5 text-lg font-medium shadow-xl hover:opacity-95 transition"
             >
               Get Started
