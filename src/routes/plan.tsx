@@ -623,26 +623,34 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
               </div>
-              <div role="tablist" aria-label="Input mode" className="inline-flex shrink-0 rounded-lg border border-border bg-background/60 p-1 text-xs">
+              {speechState !== "unsupported" && (
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={mode === "type"}
-                  onClick={() => { if (recording) stopRecording(); setMode("type"); }}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "type" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={speechState === "listening" ? stopListening : startListening}
+                  aria-label={speechState === "listening" ? "Stop voice input" : "Start voice input"}
+                  aria-pressed={speechState === "listening"}
+                  title={
+                    speechState === "denied"
+                      ? "Microphone access denied — enable it in your browser to try again"
+                      : speechState === "listening"
+                        ? "Listening… tap to stop"
+                        : "Speak your thoughts"
+                  }
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition focus:outline-none focus:ring-2 focus:ring-ring/50 ${
+                    speechState === "listening"
+                      ? "bg-priority-high text-priority-high-fg border-transparent animate-pulse"
+                      : speechState === "denied"
+                        ? "bg-background/60 text-muted-foreground border-border"
+                        : "bg-secondary text-primary border-border hover:bg-secondary/80"
+                  }`}
                 >
-                  <Keyboard className="h-3.5 w-3.5" strokeWidth={1.8} /> Type
+                  {speechState === "denied" ? (
+                    <MicOff className="h-5 w-5" strokeWidth={1.8} />
+                  ) : (
+                    <Mic className="h-5 w-5" strokeWidth={1.8} />
+                  )}
                 </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "voice"}
-                  onClick={() => setMode("voice")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 transition ${mode === "voice" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Mic className="h-3.5 w-3.5" strokeWidth={1.8} /> Voice
-                </button>
-              </div>
+              )}
             </div>
 
             <textarea
@@ -650,34 +658,25 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={PLACEHOLDER}
-              rows={mode === "voice" ? 5 : 8}
+              rows={8}
               className="mt-4 w-full resize-y rounded-xl border border-input bg-background/70 px-4 py-3.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
             />
 
-            {mode === "voice" && (
-              <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/30 p-5">
-                <button
-                  type="button"
-                  onClick={recording ? stopRecording : startRecording}
-                  disabled={transcribing}
-                  aria-label={recording ? "Stop recording" : "Start recording"}
-                  className={`grid h-16 w-16 place-items-center rounded-full shadow-sm transition focus:outline-none focus:ring-2 focus:ring-ring/50 disabled:opacity-60 ${
-                    recording
-                      ? "bg-priority-high text-priority-high-fg animate-pulse"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  }`}
-                >
-                  {transcribing ? <Loader2 className="h-7 w-7 animate-spin" /> : recording ? <Square className="h-6 w-6" fill="currentColor" /> : <Mic className="h-7 w-7" strokeWidth={1.8} />}
-                </button>
-                <p className="text-xs text-muted-foreground">
-                  {transcribing
-                    ? "Transcribing your voice note…"
-                    : recording
-                      ? `Listening… ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, "0")} · Tap to stop`
-                      : "Tap the mic and just talk. We'll add it to your notes above."}
-                </p>
-              </div>
+            {speechState !== "unsupported" && (
+              <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                {speechState === "listening" ? (
+                  <>
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-priority-high-fg animate-pulse" />
+                    Listening… tap the mic to stop. We'll auto-stop after 5s of silence.
+                  </>
+                ) : speechState === "denied" ? (
+                  <>Microphone access is blocked. Enable it in your browser settings to use voice input.</>
+                ) : (
+                  <>Tap the mic to dictate — your words appear as you speak, then you can edit.</>
+                )}
+              </p>
             )}
+
 
 
             <div className="my-6 h-px bg-border/70" />
