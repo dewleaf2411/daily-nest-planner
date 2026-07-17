@@ -8,6 +8,7 @@ import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
+import { WheelTimePicker } from "@/components/WheelTimePicker";
 import { lovable } from "@/integrations/lovable/index";
 
 export const Route = createFileRoute("/plan")({
