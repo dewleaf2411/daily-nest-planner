@@ -122,17 +122,15 @@ interface CrowdedProposal {
 function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
 
-  const [mode, setMode] = useState<InputMode>("type");
   const [guestUsed, setGuestUsed] = useState(false);
   const [showGuestCard, setShowGuestCard] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
 
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [recSeconds, setRecSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Web Speech API state
+  const [speechState, setSpeechState] = useState<SpeechState>("idle");
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef<string>("");
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +146,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
-  const transcribe = useServerFn(transcribeAudio);
 
   // Guest trial state from localStorage
   useEffect(() => {
