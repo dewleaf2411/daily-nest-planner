@@ -90,7 +90,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
       setProfile(prof);
       setDisplayName(prof.display_name ?? "");
       setAvailableUntil(prof.default_available_until);
-      setMode(prof.default_planning_mode);
+      // planning mode intentionally not surfaced in UI
       setCommitments((c ?? []) as unknown as Commitment[]);
       setLoading(false);
     };
