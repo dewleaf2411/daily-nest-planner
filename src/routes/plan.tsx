@@ -241,7 +241,7 @@ function DailyNest() {
     } finally {
       setLoading(false);
     }
-  }, [raw, availableUntil, plan]);
+  }, [raw, availableUntil, plan, savedCommitments]);
 
   const pickMimeType = (): string => {
     if (typeof MediaRecorder === "undefined") return "";
