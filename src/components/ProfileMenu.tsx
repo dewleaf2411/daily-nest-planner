@@ -104,10 +104,18 @@ export function ProfileMenu() {
               )}
             </div>
           </div>
+          <Link
+            to="/settings"
+            onClick={() => setOpen(false)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition"
+          >
+            <Settings className="h-4 w-4" />
+            Profile & Settings
+          </Link>
           <button
             type="button"
             onClick={signOut}
-            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition"
+            className="w-full flex items-center gap-2 px-4 py-3 text-sm text-foreground hover:bg-secondary/60 transition border-t border-border"
           >
             <LogOut className="h-4 w-4" />
             Sign out
