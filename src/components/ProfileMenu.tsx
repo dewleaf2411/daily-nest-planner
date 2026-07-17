@@ -24,8 +24,16 @@ export function ProfileMenu() {
         return;
       }
       const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fallbackName =
+        (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "You";
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", u.id)
+        .maybeSingle();
+      const preferred = (prof?.display_name as string | null | undefined)?.trim();
       setProfile({
-        name: (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "You",
+        name: preferred && preferred.length > 0 ? preferred : fallbackName,
         email: u.email ?? "",
         avatarUrl: (meta.avatar_url as string) || (meta.picture as string) || null,
       });

@@ -143,6 +143,7 @@ function DailyNest() {
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [savedCommitments, setSavedCommitments] = useState<Array<{ id: string; name: string; days_of_week: number[]; start_time: string; end_time: string; enabled: boolean }>>([]);
+  const [preferredName, setPreferredName] = useState<string>("");
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
@@ -152,13 +153,21 @@ function DailyNest() {
   useEffect(() => {
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id;
-      if (!uid) return;
+      const u = userData.user;
+      if (!u) return;
+      const uid = u.id;
       const [{ data: p }, { data: c }] = await Promise.all([
-        supabase.from("profiles").select("default_available_until").eq("id", uid).maybeSingle(),
+        supabase.from("profiles").select("default_available_until, display_name").eq("id", uid).maybeSingle(),
         supabase.from("fixed_commitments").select("*").eq("user_id", uid).eq("enabled", true),
       ]);
       if (p?.default_available_until) setAvailableUntil(p.default_available_until as string);
+      const preferred = (p?.display_name as string | null | undefined)?.trim();
+      const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+      const fallback =
+        (meta.full_name as string) || (meta.name as string) || u.email?.split("@")[0] || "";
+      const finalName = preferred && preferred.length > 0 ? preferred : fallback;
+      // Use just the first name for a friendlier greeting.
+      setPreferredName(finalName.split(/\s+/)[0] ?? "");
       setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
     })();
   }, []);
@@ -533,7 +542,7 @@ function DailyNest() {
               </div>
               <div className="min-w-0 flex-1">
                 <label htmlFor="tasks" className="block font-serif text-2xl font-normal text-foreground leading-tight">
-                  What's on your mind?
+                  {preferredName ? `Hi ${preferredName} — what's on your mind?` : "What's on your mind?"}
                 </label>
                 <p className="mt-1 text-xs text-muted-foreground">Rant, list, half-thoughts — the AI will pull out what actually needs doing.</p>
               </div>
