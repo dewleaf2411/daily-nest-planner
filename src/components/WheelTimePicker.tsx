@@ -8,6 +8,7 @@ interface WheelTimePickerProps {
   onChange: (next: string) => void;
   className?: string;
   ariaLabel?: string;
+  id?: string;
 }
 
 const ITEM_H = 44;
