@@ -665,17 +665,13 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             </div>
 
             <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="relative w-full sm:w-56">
-                <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-                <input
-                  id="until"
-                  type="time"
-                  value={availableUntil}
-                  onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="w-full rounded-xl border border-input bg-background/70 pl-9 pr-9 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-                />
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" strokeWidth={1.6} />
-              </div>
+              <WheelTimePicker
+                id="until"
+                value={availableUntil}
+                onChange={setAvailableUntil}
+                ariaLabel="Available until"
+                className="w-full sm:w-56"
+              />
               <button
                 type="submit"
                 disabled={loading}
