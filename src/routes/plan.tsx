@@ -8,37 +8,30 @@ import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
+import { lovable } from "@/integrations/lovable/index";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
 });
 
+const GUEST_USED_KEY = "dailynest_guest_plan_used";
+
 function PlanRoute() {
-  const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!data.session);
       setChecked(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (!session) {
-        setAuthed(false);
-        navigate({ to: "/auth", replace: true });
-      } else {
-        setAuthed(true);
-      }
+      setAuthed(!!session);
     });
     return () => sub.subscription.unsubscribe();
-  }, [navigate]);
+  }, []);
 
-  if (!checked || !authed) {
+  if (!checked) {
     return (
       <main className="min-h-screen w-full grid place-items-center">
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -48,8 +41,9 @@ function PlanRoute() {
     );
   }
 
-  return <DailyNest />;
+  return <DailyNest isGuest={!authed} />;
 }
+
 
 const PLACEHOLDER = `Just dump everything on your mind — a to-do list, a rant, half-formed thoughts. Example:
 
