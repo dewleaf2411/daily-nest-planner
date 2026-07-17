@@ -142,10 +142,26 @@ function DailyNest() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [savedCommitments, setSavedCommitments] = useState<Array<{ id: string; name: string; days_of_week: number[]; start_time: string; end_time: string; enabled: boolean }>>([]);
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
   const transcribe = useServerFn(transcribeAudio);
+
+  // Load user defaults and commitments once
+  useEffect(() => {
+    (async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) return;
+      const [{ data: p }, { data: c }] = await Promise.all([
+        supabase.from("profiles").select("default_available_until").eq("id", uid).maybeSingle(),
+        supabase.from("fixed_commitments").select("*").eq("user_id", uid).eq("enabled", true),
+      ]);
+      if (p?.default_available_until) setAvailableUntil(p.default_available_until as string);
+      setSavedCommitments((c ?? []) as unknown as typeof savedCommitments);
+    })();
+  }, []);
 
 
   const nowMinutes = useMemo(() => {
