@@ -127,8 +127,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
   const profileDirty =
     !profile ||
     (profile.display_name ?? "") !== displayName.trim() ||
-    profile.default_available_until !== availableUntil ||
-    profile.default_planning_mode !== mode;
+    profile.default_available_until !== availableUntil;
 
   const signOut = async () => {
     await supabase.auth.signOut();
