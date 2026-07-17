@@ -12,7 +12,7 @@ export const Route = createFileRoute("/")({
       { title: "DailyNest — A calm plan for real life" },
       { name: "description", content: "DailyNest turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
       { property: "og:title", content: "DailyNest — A calm plan for real life" },
-      { property: "og:description", content: "A quiet space to plan your day, so you can live with intention." },
+      { property: "og:description", content: "DailyNest turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
     ],
   }),
 });
