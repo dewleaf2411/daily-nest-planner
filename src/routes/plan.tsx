@@ -561,7 +561,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               </div>
               <h1 className="font-serif text-5xl sm:text-6xl font-normal tracking-tight text-foreground leading-none">Planner</h1>
             </div>
-            <ProfileMenu />
+            {isGuest ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 backdrop-blur-sm px-3 py-1.5 text-sm text-muted-foreground">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-secondary text-primary text-[10px] font-medium">G</span>
+                Guest
+              </span>
+            ) : (
+              <ProfileMenu />
+            )}
+
           </div>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
             A calm, honest plan for today — no dashboards, no streaks.
