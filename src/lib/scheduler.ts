@@ -192,8 +192,31 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   }
 
   schedule.sort((a, b) => a.startMinutes - b.startMinutes);
-  const scheduledMinutes = schedule.filter((s) => s.kind !== "break").reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
-  return { schedule, tomorrow, scheduledMinutes };
+
+  // Fill leftover gaps between entries with a longer break so the day
+  // doesn't have empty dead space before a fixed commitment.
+  const GAP_THRESHOLD = 10; // minutes
+  const filled: ScheduleEntry[] = [];
+  for (let i = 0; i < schedule.length; i++) {
+    const cur = schedule[i];
+    filled.push(cur);
+    const next = schedule[i + 1];
+    if (!next) continue;
+    const gap = next.startMinutes - cur.endMinutes;
+    if (gap >= GAP_THRESHOLD) {
+      filled.push({
+        id: `gap-${cur.endMinutes}-${next.startMinutes}`,
+        itemIndex: -1,
+        kind: "break",
+        title: gap >= 30 ? "Rest & recharge" : "Breather",
+        startMinutes: cur.endMinutes,
+        endMinutes: next.startMinutes,
+      });
+    }
+  }
+
+  const scheduledMinutes = filled.filter((s) => s.kind !== "break").reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
+  return { schedule: filled, tomorrow, scheduledMinutes };
 }
 
 export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
