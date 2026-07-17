@@ -317,15 +317,42 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const Ctor = getSpeechCtor();
     if (!Ctor) { setSpeechState("unsupported"); return; }
 
+    // Detect if we're inside an iframe whose Permission Policy blocks the mic.
+    // In that case the browser never shows a prompt — getUserMedia rejects immediately.
+    const inIframe = typeof window !== "undefined" && window.self !== window.top;
+    try {
+      // featurePolicy / permissionsPolicy API — if present and mic isn't allowed here, bail early with a clear message.
+      const fp: any = (document as any).featurePolicy || (document as any).permissionsPolicy;
+      if (fp && typeof fp.allowsFeature === "function" && !fp.allowsFeature("microphone")) {
+        setSpeechState("denied");
+        setError(
+          inIframe
+            ? "This preview window isn't allowed to use the mic (no permission prompt will appear here). Open the app in a new tab to dictate."
+            : "Microphone access is blocked by this page's permission policy."
+        );
+        return;
+      }
+    } catch { /* ignore and try getUserMedia */ }
+
     // Request mic permission explicitly so we can distinguish denied vs unsupported.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-    } catch {
+    } catch (gumErr: any) {
       setSpeechState("denied");
-      setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      const msg = String(gumErr?.message || "");
+      if (inIframe && (/permissions? policy/i.test(msg) || /disallowed/i.test(msg))) {
+        setError("This preview window isn't allowed to use the mic (no permission prompt will appear here). Open the app in a new tab to dictate.");
+      } else if (gumErr?.name === "NotAllowedError") {
+        setError("Microphone access was blocked. If you didn't see a prompt, this page (or the preview frame) isn't permitted to use the mic — try opening the app in a new tab.");
+      } else if (gumErr?.name === "NotFoundError") {
+        setError("No microphone was found on this device.");
+      } else {
+        setError("Couldn't access the microphone. Try opening the app in a new tab.");
+      }
       return;
     }
+
 
     const rec: any = new Ctor();
     rec.continuous = true;
