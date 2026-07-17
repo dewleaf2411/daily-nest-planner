@@ -256,13 +256,39 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
+      if (isGuest) {
+        try { localStorage.setItem(GUEST_USED_KEY, "1"); } catch { /* ignore */ }
+        setGuestUsed(true);
+        setShowGuestCard(true);
+      }
     } catch (err) {
       console.error(err);
       setError("Something went wrong while making your plan. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [raw, availableUntil, plan, savedCommitments]);
+  }, [raw, availableUntil, plan, savedCommitments, isGuest, guestUsed]);
+
+  const onGuestGoogle = useCallback(async () => {
+    setOauthLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin + "/plan",
+      });
+      if (result.error) {
+        setError(result.error.message || "Sign in failed. Please try again.");
+        setOauthLoading(false);
+        return;
+      }
+      if (result.redirected) return;
+      setShowGuestCard(false);
+      setOauthLoading(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign in failed.");
+      setOauthLoading(false);
+    }
+  }, []);
+
 
   const pickMimeType = (): string => {
     if (typeof MediaRecorder === "undefined") return "";
