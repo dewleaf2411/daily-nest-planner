@@ -71,6 +71,16 @@ function todayIso(): string {
   return `${y}-${m}-${day}`;
 }
 
+function localDateTimeIso(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  const s = String(date.getSeconds()).padStart(2, "0");
+  return `${y}-${m}-${day}T${h}:${min}:${s}`;
+}
+
 function daysBetween(fromIso: string, toIso: string): number {
   const a = new Date(fromIso + "T00:00:00");
   const b = new Date(toIso + "T00:00:00");
@@ -142,23 +152,25 @@ function DailyNest() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [planNowMinutes, setPlanNowMinutes] = useState<number | null>(null);
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
   const transcribe = useServerFn(transcribeAudio);
 
 
-  const nowMinutes = useMemo(() => {
+  const liveNowMinutes = useMemo(() => {
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
   }, [items]); // recompute when items change (rebuild triggers)
+  const nowMinutes = planNowMinutes ?? liveNowMinutes;
 
   const cutoffMinutes = hhmmToMinutes(availableUntil);
 
   const order = useMemo(() => (items ? computeOrder(items, userOrder) : []), [items, userOrder]);
 
-  const { schedule, tomorrow, scheduledMinutes } = useMemo(() => {
-    if (!items) return { schedule: [], tomorrow: [], scheduledMinutes: 0 };
+  const { schedule, tomorrow, scheduledMinutes, requiredTodayConflict } = useMemo(() => {
+    if (!items) return { schedule: [], tomorrow: [], scheduledMinutes: 0, requiredTodayConflict: null };
     return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
   }, [items, order, nowMinutes, cutoffMinutes]);
 
@@ -182,14 +194,16 @@ function DailyNest() {
     }
     setLoading(true);
     try {
+      const submittedAt = new Date();
       const res = await plan({
         data: {
           brainDump,
-          nowIso: new Date().toISOString(),
+          nowLocalIso: localDateTimeIso(submittedAt),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           availableUntil,
         },
       });
+      setPlanNowMinutes(submittedAt.getHours() * 60 + submittedAt.getMinutes());
       setItems(res.items);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
@@ -622,6 +636,12 @@ function DailyNest() {
               </div>
               {usedFallback && (
                 <p className="mt-3 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
+              )}
+
+              {requiredTodayConflict && (
+                <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
+                  There&apos;s a real time conflict: {formatDuration(requiredTodayConflict.requiredMinutes)} is required today, but only {formatDuration(requiredTodayConflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(requiredTodayConflict.missingMinutes)} still needs time.
+                </div>
               )}
 
               {status && (

@@ -38,6 +38,11 @@ export interface BuildResult {
   schedule: ScheduleEntry[];
   tomorrow: TomorrowEntry[];
   scheduledMinutes: number;
+  requiredTodayConflict: {
+    requiredMinutes: number;
+    scheduledMinutes: number;
+    missingMinutes: number;
+  } | null;
 }
 
 export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: BuildOptions): BuildResult {
@@ -71,15 +76,23 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     });
   }
 
-  // flexible tasks - respect provided order (which is already user-order + priority)
+  // Required-today work always goes first. A user may reorder the remaining work,
+  // but optional work must not displace an explicit same-day commitment.
   const flexibleQueue: PlanItem[] = [];
+  const queued = new Set<number>();
   for (const idx of order) {
     const it = byIdx.get(idx);
     if (!it) continue;
     if (it.isFixed) continue;
     if (it.suggestedDay !== "today") continue;
+    if (queued.has(it.originalIndex)) continue;
     flexibleQueue.push(it);
+    queued.add(it.originalIndex);
   }
+  for (const item of items) {
+    if (!item.isFixed && item.suggestedDay === "today" && !queued.has(item.originalIndex)) flexibleQueue.push(item);
+  }
+  flexibleQueue.sort((a, b) => Number(b.requiredToday) - Number(a.requiredToday));
 
   // Also anything suggested tomorrow explicitly goes to tomorrow
   for (const it of items) {
@@ -143,7 +156,11 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     return { placed: 0, overflow: remaining };
   };
 
+  let requiredTodayMinutes = 0;
+  let scheduledRequiredTodayMinutes = 0;
+
   for (const item of flexibleQueue) {
+    if (item.requiredToday) requiredTodayMinutes += item.durationMinutes;
     let remaining = item.durationMinutes;
     const blocksTotal = item.focusBlockMinutes ? Math.ceil(item.durationMinutes / item.focusBlockMinutes) : 1;
     let blockNum = 0;
@@ -156,6 +173,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       const { placed, overflow } = placeBlock(item, remaining, blockNum, blocksTotal, originalTotal);
       if (placed === 0) break;
       placedAny = true;
+      if (item.requiredToday) scheduledRequiredTodayMinutes += placed;
       remaining = overflow;
       // break between focus blocks
       if (remaining > 0 && item.focusBlockMinutes) {
@@ -193,7 +211,16 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   schedule.sort((a, b) => a.startMinutes - b.startMinutes);
   const scheduledMinutes = schedule.filter((s) => s.kind !== "break").reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
-  return { schedule, tomorrow, scheduledMinutes };
+  const missingMinutes = requiredTodayMinutes - scheduledRequiredTodayMinutes;
+  return {
+    schedule,
+    tomorrow,
+    scheduledMinutes,
+    requiredTodayConflict:
+      missingMinutes > 0
+        ? { requiredMinutes: requiredTodayMinutes, scheduledMinutes: scheduledRequiredTodayMinutes, missingMinutes }
+        : null,
+  };
 }
 
 export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
@@ -203,9 +230,10 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
   const flexToday = items
     .filter((i) => !i.isFixed && i.suggestedDay === "today")
     .map((i) => i.originalIndex);
-  const seen = new Set(userOrder.filter((i) => flexToday.includes(i)));
+  const requiredToday = flexToday.filter((index) => items.find((item) => item.originalIndex === index)?.requiredToday);
+  const seen = new Set(userOrder.filter((i) => flexToday.includes(i) && !requiredToday.includes(i)));
   const rest = flexToday
-    .filter((i) => !seen.has(i))
+    .filter((i) => !seen.has(i) && !requiredToday.includes(i))
     .sort((a, b) => {
       const ia = items.find((x) => x.originalIndex === a)!;
       const ib = items.find((x) => x.originalIndex === b)!;
@@ -213,5 +241,5 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
       if (p !== 0) return p;
       return ia.originalIndex - ib.originalIndex;
     });
-  return [...userOrder.filter((i) => flexToday.includes(i)), ...rest];
+  return [...requiredToday, ...userOrder.filter((i) => flexToday.includes(i) && !requiredToday.includes(i)), ...rest];
 }

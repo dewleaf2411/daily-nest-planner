@@ -7,6 +7,8 @@ export interface PlanItem {
   title: string;
   durationMinutes: number;
   priority: Priority;
+  /** Explicit language says this task must be completed today, independent of due date. */
+  requiredToday: boolean;
   reason: string;
   dueDate?: string | null;
   dueLabel?: string | null;
