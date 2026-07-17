@@ -385,12 +385,22 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     recognitionRef.current = rec;
     try {
       rec.start();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Couldn't start voice input. Please try again.");
+      const msg = String(err?.message || "");
+      if (err?.name === "NotAllowedError" && /Permission Policy/i.test(msg)) {
+        setSpeechState("denied");
+        setError("Voice input is blocked inside this preview frame. Open the app in a new tab (or the published site) to use the mic.");
+      } else if (err?.name === "NotAllowedError") {
+        setSpeechState("denied");
+        setError("Microphone access was blocked. Enable it in your browser settings to use voice input.");
+      } else {
+        setError("Couldn't start voice input. Please try again.");
+        setSpeechState("idle");
+      }
       recognitionRef.current = null;
-      setSpeechState("idle");
     }
+
   }, [raw, armSilenceTimer]);
 
   useEffect(() => {
