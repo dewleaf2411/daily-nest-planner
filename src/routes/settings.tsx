@@ -201,12 +201,13 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
             {/* Planning defaults */}
             <Section title="Planning defaults" subtitle="Optional — DailyNest has calm defaults.">
               <Field label="Default “Available until”">
-                <input
-                  type="time"
-                  value={availableUntil}
-                  onChange={(e) => setAvailableUntil(e.target.value)}
-                  className="w-full sm:max-w-xs rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                />
+                <div className="w-full sm:max-w-xs">
+                  <WheelTimePicker
+                    value={availableUntil}
+                    onChange={setAvailableUntil}
+                    ariaLabel="Default available until time"
+                  />
+                </div>
               </Field>
             </Section>
 
