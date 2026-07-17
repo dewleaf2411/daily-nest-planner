@@ -1089,6 +1089,46 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           </div>
         </div>
       )}
+
+      {isGuest && showGuestCard && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-[0_20px_60px_-24px_rgba(30,60,45,0.35)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-secondary text-primary">
+                <Leaf className="h-5 w-5" strokeWidth={1.5} />
+              </div>
+              <h3 className="font-serif text-2xl text-foreground leading-tight">Keep your DailyNest going</h3>
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+              Sign in to create more plans and save your schedule, weekly commitments, and preferences.
+            </p>
+            <div className="mt-6 space-y-2.5">
+              <button
+                type="button"
+                onClick={onGuestGoogle}
+                disabled={oauthLoading}
+                className="w-full inline-flex items-center justify-center gap-3 rounded-full border border-border bg-background px-5 py-3 text-sm font-medium text-foreground hover:bg-secondary/60 transition disabled:opacity-60"
+              >
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.3-.3-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.5 24 4.5 16.1 4.5 9.3 8.9 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 43.5c5.2 0 9.9-2 13.4-5.2l-6.2-5.2c-2 1.4-4.5 2.2-7.2 2.2-5.2 0-9.6-3.3-11.2-8l-6.5 5C9.2 39 16 43.5 24 43.5z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.6l6.2 5.2c-.4.4 6.6-4.8 6.6-14.8 0-1.2-.1-2.3-.4-3.5z"/>
+                </svg>
+                {oauthLoading ? "Signing in…" : "Continue with Google"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowGuestCard(false)}
+                className="w-full rounded-full px-5 py-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition"
+              >
+                View this plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+
   );
 }
