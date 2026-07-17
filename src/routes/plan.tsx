@@ -128,9 +128,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   // Web Speech API state
   const [speechState, setSpeechState] = useState<SpeechState>("idle");
-  const recognitionRef = useRef<any>(null);
-  const baseTextRef = useRef<string>("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceRafRef = useRef<number | null>(null);
+  const speechStartRef = useRef<number>(0);
+
   const [availableUntil, setAvailableUntil] = useState("22:00");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
