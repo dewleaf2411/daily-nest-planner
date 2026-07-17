@@ -117,9 +117,14 @@ interface CrowdedProposal {
   availableMin: number;
 }
 
-function DailyNest() {
+function DailyNest({ isGuest }: { isGuest: boolean }) {
+  const navigate = useNavigate();
   const [raw, setRaw] = useState("");
   const [mode, setMode] = useState<InputMode>("type");
+  const [guestUsed, setGuestUsed] = useState(false);
+  const [showGuestCard, setShowGuestCard] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
