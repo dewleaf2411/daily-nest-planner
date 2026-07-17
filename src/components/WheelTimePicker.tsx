@@ -110,7 +110,7 @@ function Column<T extends string | number>({
   );
 }
 
-export function WheelTimePicker({ value, onChange, className, ariaLabel }: WheelTimePickerProps) {
+export function WheelTimePicker({ value, onChange, className, ariaLabel, id }: WheelTimePickerProps) {
   const [open, setOpen] = useState(false);
   const parsed = parse24(value);
   const [h12, setH12] = useState(parsed.h12);
