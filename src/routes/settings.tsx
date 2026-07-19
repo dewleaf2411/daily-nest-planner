@@ -339,6 +339,7 @@ function CommitmentsSection({
   flash: (m: string) => void;
 }) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ commitment: Commitment; day: number } | null>(null);
   const [form, setForm] = useState<Omit<Commitment, "id">>({
     name: "",
     days_of_week: [],
