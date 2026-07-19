@@ -476,7 +476,13 @@ function CommitmentsSection({
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => remove(c.id)}
+                        onClick={() => {
+                          if (c.days_of_week.length > 1) {
+                            setDeleteTarget({ commitment: c, day: d });
+                          } else {
+                            removeAll(c.id);
+                          }
+                        }}
                         className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         aria-label="Delete"
                       >
