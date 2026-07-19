@@ -403,10 +403,21 @@ function CommitmentsSection({
     await supabase.from("fixed_commitments").update({ enabled: next }).eq("id", c.id);
   };
 
-  const remove = async (id: string) => {
+  const removeAll = async (id: string) => {
     setCommitments((prev) => prev.filter((c) => c.id !== id));
     await supabase.from("fixed_commitments").delete().eq("id", id);
     flash("Removed.");
+  };
+
+  const removeDay = async (c: Commitment, day: number) => {
+    const nextDays = c.days_of_week.filter((d) => d !== day);
+    if (nextDays.length === 0) {
+      await removeAll(c.id);
+      return;
+    }
+    setCommitments((prev) => prev.map((x) => (x.id === c.id ? { ...x, days_of_week: nextDays } : x)));
+    await supabase.from("fixed_commitments").update({ days_of_week: nextDays }).eq("id", c.id);
+    flash(`Removed for ${DAY_LONG[day]}.`);
   };
 
   const toggleDay = (d: number) => {
