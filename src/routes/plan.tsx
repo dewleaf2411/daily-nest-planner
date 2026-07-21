@@ -440,6 +440,85 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     flashStatus("Restored the previous plan.");
   };
 
+  const nextIndex = () => (items ? items.reduce((m, i) => Math.max(m, i.originalIndex), -1) + 1 : 0);
+
+  const openAddTask = () => {
+    setAddTaskForm({ title: "", durationMinutes: 15, priority: "medium" });
+    setAddMode("task");
+  };
+
+  const openAddBreak = () => {
+    // Default break start = end of last scheduled entry (or now), rounded to 5.
+    const lastEnd = schedule.length ? schedule[schedule.length - 1].endMinutes : nowMinutes;
+    const start = Math.min(cutoffMinutes - 5, Math.ceil(Math.max(lastEnd, nowMinutes) / 5) * 5);
+    const h = Math.floor(start / 60);
+    const m = start % 60;
+    setAddBreakForm({ durationMinutes: 15, startTime: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` });
+    setAddMode("break");
+  };
+
+  const submitAddTask = () => {
+    const title = addTaskForm.title.trim();
+    if (!title) return;
+    const duration = Math.max(5, Math.round(addTaskForm.durationMinutes / 5) * 5);
+    pushHistory();
+    const idx = nextIndex();
+    const newItem: PlanItem = {
+      originalIndex: idx,
+      title,
+      durationMinutes: duration,
+      priority: addTaskForm.priority,
+      requiredToday: false,
+      reason: "Added manually",
+      dueDate: null,
+      dueLabel: null,
+      dueCategory: "none",
+      suggestedDay: "today",
+      isFixed: false,
+      fixedStart: null,
+      fixedEnd: null,
+      focusBlockMinutes: null,
+      note: null,
+    };
+    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
+    setUserOrder((o) => [...o, idx]);
+    setAddMode(null);
+    flashStatus("Task added.");
+  };
+
+  const submitAddBreak = () => {
+    const duration = Math.max(5, Math.round(addBreakForm.durationMinutes / 5) * 5);
+    const [sh, sm] = addBreakForm.startTime.split(":").map((n) => parseInt(n, 10));
+    const startMin = sh * 60 + (sm || 0);
+    const endMin = Math.min(cutoffMinutes, startMin + duration);
+    const eh = Math.floor(endMin / 60);
+    const em = endMin % 60;
+    pushHistory();
+    const idx = nextIndex();
+    const newItem: PlanItem = {
+      originalIndex: idx,
+      title: "Break",
+      durationMinutes: endMin - startMin,
+      priority: "low",
+      requiredToday: false,
+      reason: "Manual break",
+      dueDate: null,
+      dueLabel: null,
+      dueCategory: "none",
+      suggestedDay: "today",
+      isFixed: true,
+      fixedStart: addBreakForm.startTime,
+      fixedEnd: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
+      focusBlockMinutes: null,
+      note: null,
+    };
+    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
+    setAddMode(null);
+    flashStatus("Break added.");
+  };
+
+
+
   // Drag-and-drop for flexible today tasks
   const dragIdxRef = useRef<number | null>(null);
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
