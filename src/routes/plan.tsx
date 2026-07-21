@@ -152,6 +152,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [planNowMinutes, setPlanNowMinutes] = useState<number | null>(null);
   const [savedCommitments, setSavedCommitments] = useState<Array<{ id: string; name: string; days_of_week: number[]; start_time: string; end_time: string; enabled: boolean }>>([]);
   const [preferredName, setPreferredName] = useState<string>("");
+  const [addMode, setAddMode] = useState<null | "task" | "break">(null);
+  const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
+  const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
 
   const plan = useServerFn(planTasks);
@@ -436,6 +439,85 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setCrowded(null);
     flashStatus("Restored the previous plan.");
   };
+
+  const nextIndex = () => (items ? items.reduce((m, i) => Math.max(m, i.originalIndex), -1) + 1 : 0);
+
+  const openAddTask = () => {
+    setAddTaskForm({ title: "", durationMinutes: 15, priority: "medium" });
+    setAddMode("task");
+  };
+
+  const openAddBreak = () => {
+    // Default break start = end of last scheduled entry (or now), rounded to 5.
+    const lastEnd = schedule.length ? schedule[schedule.length - 1].endMinutes : nowMinutes;
+    const start = Math.min(cutoffMinutes - 5, Math.ceil(Math.max(lastEnd, nowMinutes) / 5) * 5);
+    const h = Math.floor(start / 60);
+    const m = start % 60;
+    setAddBreakForm({ durationMinutes: 15, startTime: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` });
+    setAddMode("break");
+  };
+
+  const submitAddTask = () => {
+    const title = addTaskForm.title.trim();
+    if (!title) return;
+    const duration = Math.max(5, Math.round(addTaskForm.durationMinutes / 5) * 5);
+    pushHistory();
+    const idx = nextIndex();
+    const newItem: PlanItem = {
+      originalIndex: idx,
+      title,
+      durationMinutes: duration,
+      priority: addTaskForm.priority,
+      requiredToday: false,
+      reason: "Added manually",
+      dueDate: null,
+      dueLabel: null,
+      dueCategory: "none",
+      suggestedDay: "today",
+      isFixed: false,
+      fixedStart: null,
+      fixedEnd: null,
+      focusBlockMinutes: null,
+      note: null,
+    };
+    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
+    setUserOrder((o) => [...o, idx]);
+    setAddMode(null);
+    flashStatus("Task added.");
+  };
+
+  const submitAddBreak = () => {
+    const duration = Math.max(5, Math.round(addBreakForm.durationMinutes / 5) * 5);
+    const [sh, sm] = addBreakForm.startTime.split(":").map((n) => parseInt(n, 10));
+    const startMin = sh * 60 + (sm || 0);
+    const endMin = Math.min(cutoffMinutes, startMin + duration);
+    const eh = Math.floor(endMin / 60);
+    const em = endMin % 60;
+    pushHistory();
+    const idx = nextIndex();
+    const newItem: PlanItem = {
+      originalIndex: idx,
+      title: "Break",
+      durationMinutes: endMin - startMin,
+      priority: "low",
+      requiredToday: false,
+      reason: "Manual break",
+      dueDate: null,
+      dueLabel: null,
+      dueCategory: "none",
+      suggestedDay: "today",
+      isFixed: true,
+      fixedStart: addBreakForm.startTime,
+      fixedEnd: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
+      focusBlockMinutes: null,
+      note: null,
+    };
+    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
+    setAddMode(null);
+    flashStatus("Break added.");
+  };
+
+
 
   // Drag-and-drop for flexible today tasks
   const dragIdxRef = useRef<number | null>(null);
@@ -795,6 +877,115 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   })}
                 </ol>
               )}
+
+              <div className="mt-5">
+                {addMode === null && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={openAddTask}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border bg-background/70 px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/60"
+                    >
+                      <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} /> Add task
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openAddBreak}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border bg-background/70 px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/60"
+                    >
+                      <Coffee className="h-3.5 w-3.5" strokeWidth={1.8} /> Add break
+                    </button>
+                  </div>
+                )}
+
+                {addMode === "task" && (
+                  <div className="rounded-xl border border-border bg-background/70 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-medium text-foreground">New task</h3>
+                      <button type="button" onClick={() => setAddMode(null)} aria-label="Close" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Title</label>
+                      <input
+                        autoFocus
+                        value={addTaskForm.title}
+                        onChange={(e) => setAddTaskForm({ ...addTaskForm, title: e.target.value })}
+                        placeholder="e.g. Reply to Alex"
+                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      />
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
+                        <input
+                          type="number"
+                          min={5}
+                          step={5}
+                          value={addTaskForm.durationMinutes}
+                          onChange={(e) => setAddTaskForm({ ...addTaskForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Priority</label>
+                        <select
+                          value={addTaskForm.priority}
+                          onChange={(e) => setAddTaskForm({ ...addTaskForm, priority: e.target.value as Priority })}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        >
+                          <option value="high">High</option>
+                          <option value="medium">Medium</option>
+                          <option value="low">Low</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button type="button" onClick={() => setAddMode(null)} className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs hover:bg-accent">Cancel</button>
+                      <button type="button" onClick={submitAddTask} className="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">Add task</button>
+                    </div>
+                  </div>
+                )}
+
+                {addMode === "break" && (
+                  <div className="rounded-xl border border-border bg-background/70 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-medium text-foreground">New break</h3>
+                      <button type="button" onClick={() => setAddMode(null)} aria-label="Close" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Start at</label>
+                        <WheelTimePicker
+                          value={addBreakForm.startTime}
+                          onChange={(v) => setAddBreakForm({ ...addBreakForm, startTime: v })}
+                          ariaLabel="Break start time"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
+                        <input
+                          type="number"
+                          min={5}
+                          step={5}
+                          value={addBreakForm.durationMinutes}
+                          onChange={(e) => setAddBreakForm({ ...addBreakForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button type="button" onClick={() => setAddMode(null)} className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs hover:bg-accent">Cancel</button>
+                      <button type="button" onClick={submitAddBreak} className="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90">Add break</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+
 
               {tomorrow.length > 0 && (
                 <div className="mt-10">
