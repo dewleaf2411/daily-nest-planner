@@ -750,6 +750,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     return overflow?.itemIndex ?? null;
   })();
 
+  const { affectedRows, totalUnfit } = useMemo(() => {
+    if (!items) return { affectedRows: [], totalUnfit: 0 };
+    const affectedMap = new Map<number, { title: string; minutes: number }>();
+    for (const conflict of conflicts) {
+      if (conflict.type === "fixed_overlap") continue;
+      if (conflict.type === "due_today_unfit" || conflict.type === "task_overflow") {
+        const item = items.find((i) => i.originalIndex === conflict.itemIndex);
+        if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: conflict.remainingMinutes });
+      } else if (conflict.type === "fixed_displacement" || conflict.type === "required_capacity") {
+        for (const idx of conflict.affectedItemIndexes) {
+          const item = items.find((i) => i.originalIndex === idx);
+          if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: item.durationMinutes });
+        }
+      }
+    }
+    const affectedRows = Array.from(affectedMap.values());
+    const totalUnfit = dueTodayRemaining + overflowRemaining + (capacityConflict?.missingMinutes ?? 0);
+    return { affectedRows, totalUnfit };
+  }, [items, conflicts, dueTodayRemaining, overflowRemaining, capacityConflict?.missingMinutes]);
+
   const scrollToItem = (itemIndex: number) => {
     window.setTimeout(() => {
       const target =
