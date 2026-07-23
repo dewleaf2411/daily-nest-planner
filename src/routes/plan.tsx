@@ -793,13 +793,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     {formatDuration(scheduledMinutes)}
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">scheduled before {cutoffLabel}</p>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmNewPlan(true)}
-                    className="mt-2 inline-flex items-center rounded-md border border-border bg-background/70 px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  >
-                    New Plan
-                  </button>
                 </div>
               </div>
               {usedFallback && (
