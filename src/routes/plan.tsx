@@ -298,8 +298,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   const order = useMemo(() => (items ? computeOrder(items, userOrder) : []), [items, userOrder]);
 
-  const { schedule, tomorrow, scheduledMinutes, requiredTodayConflict } = useMemo(() => {
-    if (!items) return { schedule: [], tomorrow: [], scheduledMinutes: 0, requiredTodayConflict: null };
+  const { schedule, attention, tomorrow, scheduledMinutes, requiredTodayConflict } = useMemo(() => {
+    if (!items) return { schedule: [], attention: [], tomorrow: [], scheduledMinutes: 0, requiredTodayConflict: null };
     return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
   }, [items, order, nowMinutes, cutoffMinutes]);
 
@@ -454,7 +454,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   const moveToTomorrow = (idx: number) => {
     pushHistory();
-    updateItems((prev) => prev.map((it) => (it.originalIndex === idx ? { ...it, suggestedDay: "tomorrow" as const } : it)));
+    updateItems((prev) => prev.map((it) => (it.originalIndex === idx ? { ...it, suggestedDay: "tomorrow" as const, deferredByUser: true } : it)));
     setUserOrder((o) => o.filter((i) => i !== idx));
     setEditingIdx(null);
     flashStatus("Moved to Tomorrow.");
@@ -466,9 +466,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (!it) return;
     // check how much free time there is
     const test = buildSchedule({
-      items: items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)),
+      items: items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)),
       order: computeOrder(
-        items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)),
+        items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)),
         [...userOrder, idx],
       ),
       nowMinutes,
@@ -481,7 +481,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       setCrowded({ itemIndex: idx, needMin, availableMin });
     } else {
       pushHistory();
-      updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const } : x)));
+      updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
       setUserOrder((o) => [...o, idx]);
       flashStatus("Moved to Today.");
     }
@@ -493,7 +493,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     updateItems((prev) =>
       prev.map((x) => {
         if (x.originalIndex === moveIdx) return { ...x, suggestedDay: "tomorrow" as const };
-        if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const };
+        if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const, deferredByUser: false };
         return x;
       }),
     );
@@ -512,7 +512,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const m = newCutoff % 60;
     pushHistory();
     setAvailableUntil(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const } : x)));
+    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
     setUserOrder((o) => [...o, crowded.itemIndex]);
     setCrowded(null);
     flashStatus("Extended your available time and added the task.");
@@ -521,10 +521,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const crowdedDoPart = () => {
     if (!crowded) return;
     pushHistory();
-    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const } : x)));
+    updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
     setUserOrder((o) => [...o, crowded.itemIndex]);
     setCrowded(null);
-    flashStatus("Placed as much as fits today; the rest is in Tomorrow.");
+    flashStatus("Placed as much as fits today; the rest needs attention.");
   };
 
   const undo = () => {
@@ -803,7 +803,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
               {requiredTodayConflict && (
                 <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
-                  There&apos;s a real time conflict: {formatDuration(requiredTodayConflict.requiredMinutes)} is required today, but only {formatDuration(requiredTodayConflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(requiredTodayConflict.missingMinutes)} still needs time.
+                  There isn&apos;t enough time to finish everything due or needed today before {cutoffLabel}. {formatDuration(requiredTodayConflict.scheduledMinutes)} fits, and {formatDuration(requiredTodayConflict.missingMinutes)} still needs time.
                 </div>
               )}
 
@@ -812,7 +812,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               )}
 
               {scheduleWithMeta.length === 0 ? (
-                <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Tomorrow below.</p>
+                <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Needs attention or Tomorrow below.</p>
               ) : (
                 <ol className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }) => {
@@ -1109,32 +1109,45 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
 
 
-              {tomorrow.length > 0 && (
-                <div className="mt-10">
+              {[
+                { title: "Needs attention", entries: attention, needsAttention: true },
+                { title: "Tomorrow", entries: tomorrow, needsAttention: false },
+              ].map((section) => section.entries.length > 0 && (
+                <div key={section.title} className="mt-10">
                   <div className="flex items-center gap-3 border-b border-border/60 pb-4">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-                      <Calendar className="h-5 w-5" strokeWidth={1.5} />
+                      {section.needsAttention ? <AlertCircle className="h-5 w-5" strokeWidth={1.5} /> : <Calendar className="h-5 w-5" strokeWidth={1.5} />}
                     </div>
-                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">Tomorrow</h2>
+                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">{section.title}</h2>
                   </div>
                   <ul className="mt-3 space-y-2.5">
-                    {tomorrow.map((t) => {
+                    {section.entries.map((t) => {
                       const item = items.find((i) => i.originalIndex === t.itemIndex);
                       const isEditing = editingIdx === t.itemIndex;
                       return (
-                        <li key={`tm-${t.itemIndex}`} className="rounded-xl border border-border bg-card p-3 sm:p-4">
+                        <li key={`${section.needsAttention ? "attention" : "tm"}-${t.itemIndex}`} className="rounded-xl border border-border bg-card p-3 sm:p-4">
                           <div className="flex items-start gap-3 sm:gap-4">
                             <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center shrink-0">
-                              <Calendar className="h-5 w-5" />
+                              {section.needsAttention ? <AlertCircle className="h-5 w-5" /> : <Calendar className="h-5 w-5" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span className="text-xs font-medium text-muted-foreground">Tomorrow</span>
+                                <span className="text-xs font-medium text-muted-foreground">{section.needsAttention ? "Couldn’t fit today" : "Tomorrow"}</span>
                                 <PriorityPill p={t.priority} />
                                 {t.dueLabel && item && <DueLabel label={t.dueLabel} cat={item.dueCategory} />}
                               </div>
                               <div className="mt-1 text-sm font-medium text-foreground">{t.title}</div>
-                              <div className="mt-0.5 text-xs text-muted-foreground">{formatDuration(t.remainingMinutes)} remaining</div>
+                              {section.needsAttention ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {item?.dueCategory === "today"
+                                    ? `This is due today, but there isn’t enough time left before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`
+                                    : item?.requiredToday
+                                      ? `This needs to be finished today, but there isn’t enough time left before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`
+                                      : `This couldn’t fully fit today before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`}
+                                </div>
+                              ) : (
+                                <div className="mt-0.5 text-xs text-muted-foreground">{formatDuration(t.remainingMinutes)} remaining</div>
+                              )}
                               {isEditing && editForm && item && (
                                 <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 space-y-2">
                                   <div>
@@ -1194,6 +1207,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               >
                                 Move to today
                               </button>
+                              {section.needsAttention && (
+                                <button
+                                  type="button"
+                                  onClick={() => moveToTomorrow(t.itemIndex)}
+                                  className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
+                                >
+                                  Leave for tomorrow
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => startEdit(t.itemIndex)}
@@ -1208,7 +1230,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     })}
                   </ul>
                 </div>
-              )}
+              ))}
 
             </div>
           )}
@@ -1281,7 +1303,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
               >
                 Do part today
-                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the rest stays in Tomorrow.</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the rest will be marked Needs attention.</div>
               </button>
 
               {historyRef.current && (

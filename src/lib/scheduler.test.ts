@@ -73,7 +73,7 @@ describe("required-today planning", () => {
     expect(result.schedule[0]).toEqual(
       expect.objectContaining({ itemIndex: 2, startMinutes: 1140, endMinutes: 1200 }),
     );
-    expect(result.tomorrow.some((entry) => entry.itemIndex === 0 || entry.itemIndex === 1)).toBe(
+    expect(result.attention.some((entry) => entry.itemIndex === 0 || entry.itemIndex === 1)).toBe(
       true,
     );
     expect(result.tomorrow.some((entry) => entry.itemIndex === 2)).toBe(false);
@@ -100,9 +100,10 @@ describe("required-today planning", () => {
       scheduledMinutes: 180,
       missingMinutes: 60,
     });
-    expect(result.tomorrow).toContainEqual(
+    expect(result.attention).toContainEqual(
       expect.objectContaining({ itemIndex: 0, remainingMinutes: 60 }),
     );
+    expect(result.tomorrow).toHaveLength(0);
   });
 
   it("keeps a next-week due date while scheduling work on it today", () => {
@@ -125,5 +126,107 @@ describe("required-today planning", () => {
       }),
     );
     expect(result.schedule).toContainEqual(expect.objectContaining({ itemIndex: 0 }));
+  });
+
+  it("keeps orchestra fixed and schedules flexible work around it", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry", durationMinutes: 90, focusBlockMinutes: 45 }),
+      task({
+        originalIndex: 1,
+        title: "Orchestra",
+        durationMinutes: 120,
+        priority: "high",
+        isFixed: true,
+        fixedStart: "18:15",
+        fixedEnd: "20:15",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 17 * 60 + 20,
+      cutoffMinutes: 22 * 60,
+    });
+
+    expect(result.schedule.find((entry) => entry.itemIndex === 1)).toEqual(
+      expect.objectContaining({ kind: "fixed", startMinutes: 18 * 60 + 15, endMinutes: 20 * 60 + 15 }),
+    );
+    expect(result.schedule.filter((entry) => entry.itemIndex === 0)).toEqual([
+      expect.objectContaining({ startMinutes: 17 * 60 + 20, endMinutes: 18 * 60 + 5, blockNumber: 1, totalBlocks: 2 }),
+      expect.objectContaining({ startMinutes: 20 * 60 + 15, endMinutes: 21 * 60, blockNumber: 2, totalBlocks: 2 }),
+    ]);
+  });
+
+  it("marks a due-today email that cannot fit as needing attention without changing its due date", () => {
+    const items = [
+      task({
+        title: "Send email",
+        durationMinutes: 45,
+        priority: "high",
+        dueDate: "2026-07-17",
+        dueLabel: "Due today",
+        dueCategory: "today",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 22 * 60,
+      cutoffMinutes: 22 * 60,
+    });
+
+    expect(items[0].dueDate).toBe("2026-07-17");
+    expect(result.attention).toEqual([
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 45 }),
+    ]);
+    expect(result.tomorrow).toHaveLength(0);
+    expect(result.requiredTodayConflict).toEqual({
+      requiredMinutes: 45,
+      scheduledMinutes: 0,
+      missingMinutes: 45,
+    });
+  });
+
+  it("never lists a partially scheduled task in both Today and Tomorrow", () => {
+    const items = [task({ title: "Read chapter", durationMinutes: 60 })];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 21 * 60 + 30,
+      cutoffMinutes: 22 * 60,
+    });
+
+    expect(result.schedule.some((entry) => entry.itemIndex === 0)).toBe(true);
+    expect(result.attention).toContainEqual(expect.objectContaining({ itemIndex: 0, remainingMinutes: 30 }));
+    expect(result.tomorrow.some((entry) => entry.itemIndex === 0)).toBe(false);
+  });
+
+  it("makes the scheduled total equal every visible task, fixed commitment, and break block", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry", durationMinutes: 90, focusBlockMinutes: 45 }),
+      task({
+        originalIndex: 1,
+        title: "Orchestra",
+        durationMinutes: 120,
+        priority: "high",
+        isFixed: true,
+        fixedStart: "18:15",
+        fixedEnd: "20:15",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 17 * 60 + 20,
+      cutoffMinutes: 22 * 60,
+    });
+    const visibleMinutes = result.schedule.reduce(
+      (total, entry) => total + entry.endMinutes - entry.startMinutes,
+      0,
+    );
+
+    expect(result.schedule.some((entry) => entry.kind === "break")).toBe(true);
+    expect(result.scheduledMinutes).toBe(visibleMinutes);
+    expect(result.scheduledMinutes).toBe(215);
   });
 });

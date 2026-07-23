@@ -19,6 +19,8 @@ export interface PlanItem {
   fixedEnd?: string | null;
   focusBlockMinutes?: number | null;
   note?: string | null;
+  /** The user explicitly chose to leave a same-day item for tomorrow. */
+  deferredByUser?: boolean;
 }
 
 export type ScheduleEntryKind = "task" | "break" | "fixed";
