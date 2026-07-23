@@ -50,3 +50,36 @@ export interface TomorrowEntry {
   dueLabel?: string | null;
   reason?: string;
 }
+
+export type SchedulingConflict =
+  | {
+      type: "fixed_overlap";
+      firstItemIndex: number;
+      secondItemIndex: number;
+      overlapStartMinutes: number;
+      overlapEndMinutes: number;
+    }
+  | {
+      type: "due_today_unfit";
+      itemIndex: number;
+      dueDate: string | null;
+      remainingMinutes: number;
+    }
+  | {
+      type: "required_capacity";
+      affectedItemIndexes: number[];
+      requiredMinutes: number;
+      scheduledMinutes: number;
+      missingMinutes: number;
+    }
+  | {
+      type: "fixed_displacement";
+      fixedItemIndexes: number[];
+      affectedItemIndexes: number[];
+      blockedMinutes: number;
+    }
+  | {
+      type: "task_overflow";
+      itemIndex: number;
+      remainingMinutes: number;
+    };
