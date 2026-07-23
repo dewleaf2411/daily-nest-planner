@@ -157,13 +157,37 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
   const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
+  const [undoIdx, setUndoIdx] = useState<number | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
+  const [confirmNewPlan, setConfirmNewPlan] = useState(false);
+  const hydratedRef = useRef(false);
   const toggleComplete = useCallback((idx: number) => {
     setCompletedTasks((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      if (next.has(idx)) {
+        next.delete(idx);
+        setUndoIdx((x) => (x === idx ? null : x));
+      } else {
+        next.add(idx);
+        setUndoIdx(idx);
+        if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = window.setTimeout(
+          () => setUndoIdx((x) => (x === idx ? null : x)),
+          5000,
+        );
+      }
       return next;
     });
   }, []);
+  const undoComplete = useCallback(() => {
+    setCompletedTasks((prev) => {
+      if (undoIdx === null) return prev;
+      const next = new Set(prev);
+      next.delete(undoIdx);
+      return next;
+    });
+    setUndoIdx(null);
+  }, [undoIdx]);
 
   const plan = useServerFn(planTasks);
 
