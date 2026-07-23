@@ -168,6 +168,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const undoTimerRef = useRef<number | null>(null);
   const [confirmNewPlan, setConfirmNewPlan] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
+  const [showAffectedTasks, setShowAffectedTasks] = useState(false);
   const hydratedRef = useRef(false);
   const presentedConflictKeyRef = useRef("");
   const stopTimeControlRef = useRef<HTMLDivElement | null>(null);
