@@ -535,14 +535,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
     const needMin = it.durationMinutes;
     const availableMin = Math.max(0, cutoffMinutes - Math.max(nowMinutes, 0));
+    pushHistory();
+    updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
+    setUserOrder((o) => [...o, idx]);
     if (scheduledForTask < it.durationMinutes) {
-      setCrowded({ itemIndex: idx, needMin, availableMin });
+      flashStatus("Moved to Today — some of it may not fit before your available-until time.");
     } else {
-      pushHistory();
-      updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
-      setUserOrder((o) => [...o, idx]);
       flashStatus("Moved to Today.");
     }
+
   };
 
   const crowdedMakeRoom = (moveIdx: number) => {
