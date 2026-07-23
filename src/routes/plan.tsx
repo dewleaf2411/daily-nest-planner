@@ -1331,6 +1331,51 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           </div>
         </div>
       )}
+
+      {undoIdx !== null && (
+        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2">
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-3 rounded-full border border-border bg-card/95 px-4 py-2 text-sm text-foreground shadow-md backdrop-blur-sm"
+          >
+            <Check className="h-4 w-4 text-primary" strokeWidth={2} />
+            <span className="text-muted-foreground">Task completed</span>
+            <button
+              type="button"
+              onClick={undoComplete}
+              className="rounded-md px-2 py-0.5 text-xs font-medium text-primary hover:bg-secondary/60"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmNewPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <h3 className="font-serif text-xl text-foreground">Start a new plan?</h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">Your current plan will be cleared.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmNewPlan(false)}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={startNewPlan}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Start New Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
 
   );
