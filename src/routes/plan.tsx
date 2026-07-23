@@ -1634,11 +1634,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             </p>
 
             <div className="mt-4 space-y-2">
-              <details className="rounded-lg border border-border bg-background/60 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-foreground">Make room</summary>
+              <details open className="rounded-lg border border-border bg-background/60 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-foreground">Move something from today to tomorrow to make room</summary>
                 <ul className="mt-2 space-y-2">
                   {items
-                    .filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex)
+                    .filter((i) => !i.isFixed && i.suggestedDay === "today" && i.originalIndex !== crowded.itemIndex)
                     .map((i) => {
                       const canSplit = i.durationMinutes >= 10;
                       const defaultSplit = Math.max(5, Math.min(i.durationMinutes - 5, Math.round(i.durationMinutes / 2 / 5) * 5));
@@ -1654,12 +1654,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               onClick={() => crowdedMakeRoom(i.originalIndex)}
                               className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
                             >
-                              Move all
+                              Move all to tomorrow
                             </button>
                           </div>
                           {canSplit && (
-                            <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              <span>Move</span>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>Or move just</span>
                               <input
                                 type="number"
                                 min={5}
@@ -1672,7 +1672,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                 }}
                                 className="w-14 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
                               />
-                              <span>min to tomorrow</span>
+                              <span>min to tomorrow (finish the rest today)</span>
                               <button
                                 type="button"
                                 onClick={() => crowdedSplitToTomorrow(i.originalIndex, currentSplit)}
@@ -1685,11 +1685,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         </li>
                       );
                     })}
-                  {items.filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex).length === 0 && (
-                    <li className="text-xs text-muted-foreground">No lower-priority today tasks to move.</li>
+                  {items.filter((i) => !i.isFixed && i.suggestedDay === "today" && i.originalIndex !== crowded.itemIndex).length === 0 && (
+                    <li className="text-xs text-muted-foreground">No flexible tasks on today's plan to move.</li>
                   )}
                 </ul>
               </details>
+
 
               <button
                 type="button"
