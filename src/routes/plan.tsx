@@ -1635,23 +1635,55 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             <div className="mt-4 space-y-2">
               <details className="rounded-lg border border-border bg-background/60 p-3">
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Make room</summary>
-                <ul className="mt-2 space-y-1.5">
+                <ul className="mt-2 space-y-2">
                   {items
                     .filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex)
-                    .map((i) => (
-                      <li key={`mr-${i.originalIndex}`} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate">
-                          {i.title} <span className="text-muted-foreground">· {formatDuration(i.durationMinutes)}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => crowdedMakeRoom(i.originalIndex)}
-                          className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
-                        >
-                          Move to tomorrow
-                        </button>
-                      </li>
-                    ))}
+                    .map((i) => {
+                      const canSplit = i.durationMinutes >= 10;
+                      const defaultSplit = Math.max(5, Math.min(i.durationMinutes - 5, Math.round(i.durationMinutes / 2 / 5) * 5));
+                      const currentSplit = splitMinutes[i.originalIndex] ?? defaultSplit;
+                      return (
+                        <li key={`mr-${i.originalIndex}`} className="rounded-md border border-border/60 bg-background/60 p-2">
+                          <div className="flex items-center justify-between gap-2 text-sm">
+                            <span className="truncate">
+                              {i.title} <span className="text-muted-foreground">· {formatDuration(i.durationMinutes)}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => crowdedMakeRoom(i.originalIndex)}
+                              className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
+                            >
+                              Move all
+                            </button>
+                          </div>
+                          {canSplit && (
+                            <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>Move</span>
+                              <input
+                                type="number"
+                                min={5}
+                                max={i.durationMinutes - 5}
+                                step={5}
+                                value={currentSplit}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value, 10);
+                                  setSplitMinutes((s) => ({ ...s, [i.originalIndex]: isNaN(v) ? 5 : v }));
+                                }}
+                                className="w-14 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
+                              />
+                              <span>min to tomorrow</span>
+                              <button
+                                type="button"
+                                onClick={() => crowdedSplitToTomorrow(i.originalIndex, currentSplit)}
+                                className="ml-auto inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+                              >
+                                Split
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   {items.filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex).length === 0 && (
                     <li className="text-xs text-muted-foreground">No lower-priority today tasks to move.</li>
                   )}
