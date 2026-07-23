@@ -688,12 +688,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setAddMode(null);
 
     if (scheduledForTask < duration) {
-      const availableMin = Math.max(0, scheduledForTask);
-      setCrowded({ itemIndex: idx, needMin: duration, availableMin });
-      flashStatus("Not enough time today — pick how to fit it.");
+      flashStatus("Task added — some of it may not fit before your available-until time.");
     } else {
       flashStatus("Task added.");
     }
+
   };
 
   const submitAddBreak = () => {
