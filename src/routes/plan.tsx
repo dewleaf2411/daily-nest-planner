@@ -221,6 +221,70 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     })();
   }, [isGuest]);
 
+  // Restore saved plan from localStorage on mount
+  useEffect(() => {
+    try {
+      const rawSaved = localStorage.getItem(PLAN_STORAGE_KEY);
+      if (rawSaved) {
+        const parsed = JSON.parse(rawSaved) as {
+          raw?: string;
+          items?: PlanItem[];
+          userOrder?: number[];
+          availableUntil?: string;
+          completedTasks?: number[];
+          usedFallback?: boolean;
+          planNowMinutes?: number | null;
+        };
+        if (Array.isArray(parsed.items) && parsed.items.length > 0) setItems(parsed.items);
+        if (Array.isArray(parsed.userOrder)) setUserOrder(parsed.userOrder);
+        if (typeof parsed.availableUntil === "string") setAvailableUntil(parsed.availableUntil);
+        if (Array.isArray(parsed.completedTasks)) setCompletedTasks(new Set(parsed.completedTasks));
+        if (typeof parsed.raw === "string") setRaw(parsed.raw);
+        if (typeof parsed.usedFallback === "boolean") setUsedFallback(parsed.usedFallback);
+        if (typeof parsed.planNowMinutes === "number") setPlanNowMinutes(parsed.planNowMinutes);
+      }
+    } catch { /* ignore */ }
+    hydratedRef.current = true;
+  }, []);
+
+  // Persist the current plan to localStorage whenever it changes
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!items) return;
+    try {
+      localStorage.setItem(
+        PLAN_STORAGE_KEY,
+        JSON.stringify({
+          raw,
+          items,
+          userOrder,
+          availableUntil,
+          completedTasks: Array.from(completedTasks),
+          usedFallback,
+          planNowMinutes,
+        }),
+      );
+    } catch { /* ignore */ }
+  }, [items, userOrder, availableUntil, completedTasks, raw, usedFallback, planNowMinutes]);
+
+  const startNewPlan = useCallback(() => {
+    setItems(null);
+    setUserOrder([]);
+    setCompletedTasks(new Set());
+    setRaw("");
+    setUsedFallback(false);
+    setPlanNowMinutes(null);
+    setEditingIdx(null);
+    setEditForm(null);
+    setUndoIdx(null);
+    setStatus(null);
+    setError(null);
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    try { localStorage.removeItem(PLAN_STORAGE_KEY); } catch { /* ignore */ }
+    setConfirmNewPlan(false);
+  }, []);
+
+
 
 
   const liveNowMinutes = useMemo(() => {
