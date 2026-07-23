@@ -782,7 +782,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                 <DueLabel label={entry.dueLabel} cat={item?.dueCategory ?? "none"} />
                               )}
                             </div>
-                            <div className="mt-1 text-sm font-medium text-foreground truncate">{entry.title}</div>
+                            <div className={`mt-1 text-sm font-medium text-foreground truncate ${item && completedTasks.has(item.originalIndex) ? "line-through decoration-1" : ""}`}>{entry.title}</div>
                             {entry.isFirstBlock && entry.totalDuration && (
                               <div className="mt-0.5 text-xs text-muted-foreground">
                                 Total: {formatDuration(entry.totalDuration)} ·{" "}
