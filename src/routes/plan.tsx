@@ -15,6 +15,7 @@ export const Route = createFileRoute("/plan")({
 });
 
 const GUEST_USED_KEY = "dailynest_guest_plan_used";
+const PLAN_STORAGE_KEY = "dailynest.plan.v1";
 
 function PlanRoute() {
   const [checked, setChecked] = useState(false);
