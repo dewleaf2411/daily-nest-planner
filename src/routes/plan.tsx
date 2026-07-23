@@ -559,6 +559,40 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     flashStatus("Made room and rebuilt the timeline.");
   };
 
+  const crowdedSplitToTomorrow = (moveIdx: number, splitMin: number) => {
+    if (!crowded || !items) return;
+    const src = items.find((i) => i.originalIndex === moveIdx);
+    if (!src) return;
+    const rounded = Math.max(5, Math.round(splitMin / 5) * 5);
+    if (rounded >= src.durationMinutes) {
+      crowdedMakeRoom(moveIdx);
+      return;
+    }
+    const newIdx = nextIndex();
+    pushHistory();
+    updateItems((prev) => {
+      const mapped = prev.map((x) => {
+        if (x.originalIndex === moveIdx) return { ...x, durationMinutes: x.durationMinutes - rounded };
+        if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const, deferredByUser: false };
+        return x;
+      });
+      const spillover: PlanItem = {
+        ...src,
+        originalIndex: newIdx,
+        durationMinutes: rounded,
+        suggestedDay: "tomorrow" as const,
+        isFixed: false,
+        fixedStart: null,
+        fixedEnd: null,
+        reason: "Split from today",
+      };
+      return [...mapped, spillover];
+    });
+    setUserOrder((o) => [...o, crowded.itemIndex]);
+    setCrowded(null);
+    flashStatus(`Moved ${formatDuration(rounded)} of "${src.title}" to tomorrow.`);
+  };
+
   const crowdedExtend = () => {
     if (!crowded) return;
     const needExtraMin = crowded.needMin - crowded.availableMin;
