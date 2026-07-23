@@ -1434,18 +1434,28 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           <p className="text-sm text-muted-foreground">
                             Also, {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
                           </p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowConflictModal(false);
-                              window.setTimeout(() => {
-                                document.getElementById("conflict-banner")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                              }, 50);
-                            }}
-                            className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
-                          >
-                            Review unscheduled tasks
-                          </button>
+                          {affectedRows.length > 0 && (
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={() => setShowAffectedTasks((v) => !v)}
+                                className="flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                              >
+                                {showAffectedTasks ? "Hide affected tasks" : "Show affected tasks"}
+                                {showAffectedTasks ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              </button>
+                              {showAffectedTasks && (
+                                <ul className="mt-2 space-y-1.5">
+                                  {affectedRows.map((row, i) => (
+                                    <li key={i} className="flex items-center justify-between gap-3 text-sm">
+                                      <span className="truncate text-foreground">{row.title}</span>
+                                      <span className="shrink-0 text-xs text-muted-foreground">{formatDuration(row.minutes)}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </>
