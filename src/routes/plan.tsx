@@ -1390,57 +1390,106 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               </button>
             </div>
 
-            <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-              {conflicts.map((conflict, index) => {
-                if (conflict.type === "fixed_overlap") {
-                  const first = items.find((item) => item.originalIndex === conflict.firstItemIndex);
-                  const second = items.find((item) => item.originalIndex === conflict.secondItemIndex);
+            {overlapConflicts.length > 0 ? (
+              <div className="mt-4 space-y-4">
+                {(() => {
+                  const overlap = overlapConflicts[0];
+                  const first = items.find((item) => item.originalIndex === overlap.firstItemIndex);
+                  const second = items.find((item) => item.originalIndex === overlap.secondItemIndex);
+                  const affectedMap = new Map<number, { title: string; minutes: number }>();
+                  for (const conflict of conflicts) {
+                    if (conflict.type === "fixed_overlap") continue;
+                    if (conflict.type === "due_today_unfit" || conflict.type === "task_overflow") {
+                      const item = items.find((i) => i.originalIndex === conflict.itemIndex);
+                      if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: conflict.remainingMinutes });
+                    } else if (conflict.type === "fixed_displacement" || conflict.type === "required_capacity") {
+                      for (const idx of conflict.affectedItemIndexes) {
+                        const item = items.find((i) => i.originalIndex === idx);
+                        if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: item.durationMinutes });
+                      }
+                    }
+                  }
+                  const affectedRows = Array.from(affectedMap.values());
+                  const totalUnfit = dueTodayRemaining + overflowRemaining + (capacityConflict?.missingMinutes ?? 0);
                   return (
-                    <li key={`overlap-${conflict.firstItemIndex}-${conflict.secondItemIndex}`}>
-                      <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
-                      <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> both take place from {minutesToTimeLabel(conflict.overlapStartMinutes)}–{minutesToTimeLabel(conflict.overlapEndMinutes)}. DailyNest can&apos;t decide which one you will attend.
-                    </li>
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
+                        <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> overlap from {minutesToTimeLabel(overlap.overlapStartMinutes)}–{minutesToTimeLabel(overlap.overlapEndMinutes)}.
+                      </p>
+                      {affectedRows.length > 0 && (
+                        <div className="rounded-xl border border-border bg-background/60 p-3">
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Also couldn&apos;t fit today</h4>
+                          <ul className="space-y-2">
+                            {affectedRows.map((row, i) => (
+                              <li key={`affected-${i}`} className="flex items-center justify-between text-sm">
+                                <span className="text-foreground">{row.title}</span>
+                                <span className="text-muted-foreground tabular-nums">{formatDuration(row.minutes)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 text-sm text-muted-foreground">
+                            {formatDuration(totalUnfit)} could not be scheduled before {cutoffLabel}.
+                          </p>
+                        </div>
+                      )}
+                    </>
                   );
-                }
-                if (conflict.type === "fixed_displacement") {
-                  const fixedDescriptions = conflict.fixedItemIndexes.map((itemIndex) => {
-                    const item = items.find((candidate) => candidate.originalIndex === itemIndex);
-                    return item
-                      ? `${item.title} is fixed from ${minutesToTimeLabel(hhmmToMinutes(item.fixedStart ?? "00:00"))}–${minutesToTimeLabel(hhmmToMinutes(item.fixedEnd ?? "00:00"))}`
-                      : null;
-                  }).filter(Boolean);
-                  const affectedNames = conflict.affectedItemIndexes.map(
-                    (itemIndex) => items.find((item) => item.originalIndex === itemIndex)?.title,
-                  ).filter(Boolean);
-                  return (
-                    <li key={`fixed-displacement-${index}`}>
-                      {fixedDescriptions.join("; ")}, so {affectedNames.join(" and ") || "important work"} could not all fit before {cutoffLabel}.
-                    </li>
-                  );
-                }
-                if (conflict.type === "due_today_unfit") {
+                })()}
+              </div>
+            ) : (
+              <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
+                {conflicts.map((conflict, index) => {
+                  if (conflict.type === "fixed_overlap") {
+                    const first = items.find((item) => item.originalIndex === conflict.firstItemIndex);
+                    const second = items.find((item) => item.originalIndex === conflict.secondItemIndex);
+                    return (
+                      <li key={`overlap-${conflict.firstItemIndex}-${conflict.secondItemIndex}`}>
+                        <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
+                        <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> both take place from {minutesToTimeLabel(conflict.overlapStartMinutes)}–{minutesToTimeLabel(conflict.overlapEndMinutes)}. DailyNest can&apos;t decide which one you will attend.
+                      </li>
+                    );
+                  }
+                  if (conflict.type === "fixed_displacement") {
+                    const fixedDescriptions = conflict.fixedItemIndexes.map((itemIndex) => {
+                      const item = items.find((candidate) => candidate.originalIndex === itemIndex);
+                      return item
+                        ? `${item.title} is fixed from ${minutesToTimeLabel(hhmmToMinutes(item.fixedStart ?? "00:00"))}–${minutesToTimeLabel(hhmmToMinutes(item.fixedEnd ?? "00:00"))}`
+                        : null;
+                    }).filter(Boolean);
+                    const affectedNames = conflict.affectedItemIndexes.map(
+                      (itemIndex) => items.find((item) => item.originalIndex === itemIndex)?.title,
+                    ).filter(Boolean);
+                    return (
+                      <li key={`fixed-displacement-${index}`}>
+                        {fixedDescriptions.join("; ")}, so {affectedNames.join(" and ") || "important work"} could not all fit before {cutoffLabel}.
+                      </li>
+                    );
+                  }
+                  if (conflict.type === "due_today_unfit") {
+                    const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
+                    return (
+                      <li key={`due-${conflict.itemIndex}`}>
+                        <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> is due today{conflict.dueDate ? ` (${conflict.dueDate})` : ""} and still needs {formatDuration(conflict.remainingMinutes)}. Its due date has not changed, and it has not been marked complete.
+                      </li>
+                    );
+                  }
+                  if (conflict.type === "required_capacity") {
+                    return (
+                      <li key="required-capacity">
+                        {formatDuration(conflict.requiredMinutes)} is due or required today, but only {formatDuration(conflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(conflict.missingMinutes)} still needs time.
+                      </li>
+                    );
+                  }
                   const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
                   return (
-                    <li key={`due-${conflict.itemIndex}`}>
-                      <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> is due today{conflict.dueDate ? ` (${conflict.dueDate})` : ""} and still needs {formatDuration(conflict.remainingMinutes)}. Its due date has not changed, and it has not been marked complete.
+                    <li key={`overflow-${conflict.itemIndex}`}>
+                      <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> could not fully fit today and still needs {formatDuration(conflict.remainingMinutes)}.
                     </li>
                   );
-                }
-                if (conflict.type === "required_capacity") {
-                  return (
-                    <li key="required-capacity">
-                      {formatDuration(conflict.requiredMinutes)} is due or required today, but only {formatDuration(conflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(conflict.missingMinutes)} still needs time.
-                    </li>
-                  );
-                }
-                const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
-                return (
-                  <li key={`overflow-${conflict.itemIndex}`}>
-                    <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> could not fully fit today and still needs {formatDuration(conflict.remainingMinutes)}.
-                  </li>
-                );
-              })}
-            </ul>
+                })}
+              </ul>
+            )}
 
             {overlapConflicts.length > 0 ? (
               <div className="mt-5 flex flex-wrap justify-end gap-2">
