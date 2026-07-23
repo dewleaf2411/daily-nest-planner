@@ -1435,7 +1435,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                             Also, {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            They&apos;ve been moved to your Tomorrow list — scroll down to edit them.
+                            They&apos;ve been moved to your Tomorrow — scroll down to edit them.
                           </p>
                           {affectedRows.length > 0 && (
                             <div className="mt-2">
