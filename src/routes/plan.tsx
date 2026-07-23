@@ -918,7 +918,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               )}
 
               {conflicts.length > 0 && (
-                <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
+                <div id="conflict-banner" className="mt-3 flex items-center justify-between gap-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
                   <div className="min-w-0 flex-1">
                     {overlapConflicts.length > 0 && (
                       <span>{overlapConflicts.length} unresolved fixed-time overlap{overlapConflicts.length === 1 ? "" : "s"}. </span>
