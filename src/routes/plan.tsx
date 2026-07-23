@@ -161,6 +161,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [preferredName, setPreferredName] = useState<string>("");
   const [addMode, setAddMode] = useState<null | "task" | "break">(null);
   const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
+  const [splitMinutes, setSplitMinutes] = useState<Record<number, number>>({});
   const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
   const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
@@ -557,6 +558,40 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setUserOrder((o) => [...o.filter((i) => i !== moveIdx), crowded.itemIndex]);
     setCrowded(null);
     flashStatus("Made room and rebuilt the timeline.");
+  };
+
+  const crowdedSplitToTomorrow = (moveIdx: number, splitMin: number) => {
+    if (!crowded || !items) return;
+    const src = items.find((i) => i.originalIndex === moveIdx);
+    if (!src) return;
+    const rounded = Math.max(5, Math.round(splitMin / 5) * 5);
+    if (rounded >= src.durationMinutes) {
+      crowdedMakeRoom(moveIdx);
+      return;
+    }
+    const newIdx = nextIndex();
+    pushHistory();
+    updateItems((prev) => {
+      const mapped = prev.map((x) => {
+        if (x.originalIndex === moveIdx) return { ...x, durationMinutes: x.durationMinutes - rounded };
+        if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const, deferredByUser: false };
+        return x;
+      });
+      const spillover: PlanItem = {
+        ...src,
+        originalIndex: newIdx,
+        durationMinutes: rounded,
+        suggestedDay: "tomorrow" as const,
+        isFixed: false,
+        fixedStart: null,
+        fixedEnd: null,
+        reason: "Split from today",
+      };
+      return [...mapped, spillover];
+    });
+    setUserOrder((o) => [...o, crowded.itemIndex]);
+    setCrowded(null);
+    flashStatus(`Moved ${formatDuration(rounded)} of "${src.title}" to tomorrow.`);
   };
 
   const crowdedExtend = () => {
@@ -1601,23 +1636,55 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             <div className="mt-4 space-y-2">
               <details className="rounded-lg border border-border bg-background/60 p-3">
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Make room</summary>
-                <ul className="mt-2 space-y-1.5">
+                <ul className="mt-2 space-y-2">
                   {items
                     .filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex)
-                    .map((i) => (
-                      <li key={`mr-${i.originalIndex}`} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate">
-                          {i.title} <span className="text-muted-foreground">· {formatDuration(i.durationMinutes)}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => crowdedMakeRoom(i.originalIndex)}
-                          className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
-                        >
-                          Move to tomorrow
-                        </button>
-                      </li>
-                    ))}
+                    .map((i) => {
+                      const canSplit = i.durationMinutes >= 10;
+                      const defaultSplit = Math.max(5, Math.min(i.durationMinutes - 5, Math.round(i.durationMinutes / 2 / 5) * 5));
+                      const currentSplit = splitMinutes[i.originalIndex] ?? defaultSplit;
+                      return (
+                        <li key={`mr-${i.originalIndex}`} className="rounded-md border border-border/60 bg-background/60 p-2">
+                          <div className="flex items-center justify-between gap-2 text-sm">
+                            <span className="truncate">
+                              {i.title} <span className="text-muted-foreground">· {formatDuration(i.durationMinutes)}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => crowdedMakeRoom(i.originalIndex)}
+                              className="inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent"
+                            >
+                              Move all
+                            </button>
+                          </div>
+                          {canSplit && (
+                            <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>Move</span>
+                              <input
+                                type="number"
+                                min={5}
+                                max={i.durationMinutes - 5}
+                                step={5}
+                                value={currentSplit}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value, 10);
+                                  setSplitMinutes((s) => ({ ...s, [i.originalIndex]: isNaN(v) ? 5 : v }));
+                                }}
+                                className="w-14 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
+                              />
+                              <span>min to tomorrow</span>
+                              <button
+                                type="button"
+                                onClick={() => crowdedSplitToTomorrow(i.originalIndex, currentSplit)}
+                                className="ml-auto inline-flex items-center rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+                              >
+                                Split
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   {items.filter((i) => !i.isFixed && i.suggestedDay === "today" && i.priority !== "high" && i.originalIndex !== crowded.itemIndex).length === 0 && (
                     <li className="text-xs text-muted-foreground">No lower-priority today tasks to move.</li>
                   )}
