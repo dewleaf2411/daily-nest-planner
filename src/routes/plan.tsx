@@ -1428,21 +1428,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   const overlap = overlapConflicts[0];
                   const first = items.find((item) => item.originalIndex === overlap.firstItemIndex);
                   const second = items.find((item) => item.originalIndex === overlap.secondItemIndex);
-                  const affectedMap = new Map<number, { title: string; minutes: number }>();
-                  for (const conflict of conflicts) {
-                    if (conflict.type === "fixed_overlap") continue;
-                    if (conflict.type === "due_today_unfit" || conflict.type === "task_overflow") {
-                      const item = items.find((i) => i.originalIndex === conflict.itemIndex);
-                      if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: conflict.remainingMinutes });
-                    } else if (conflict.type === "fixed_displacement" || conflict.type === "required_capacity") {
-                      for (const idx of conflict.affectedItemIndexes) {
-                        const item = items.find((i) => i.originalIndex === idx);
-                        if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: item.durationMinutes });
-                      }
-                    }
-                  }
-                  const affectedRows = Array.from(affectedMap.values());
-                  const totalUnfit = dueTodayRemaining + overflowRemaining + (capacityConflict?.missingMinutes ?? 0);
                   return (
                     <>
                       <p className="text-sm text-muted-foreground">
@@ -1486,57 +1471,44 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 })()}
               </div>
             ) : (
-              <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-                {conflicts.map((conflict, index) => {
-                  if (conflict.type === "fixed_overlap") {
-                    const first = items.find((item) => item.originalIndex === conflict.firstItemIndex);
-                    const second = items.find((item) => item.originalIndex === conflict.secondItemIndex);
-                    return (
-                      <li key={`overlap-${conflict.firstItemIndex}-${conflict.secondItemIndex}`}>
-                        <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
-                        <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> both take place from {minutesToTimeLabel(conflict.overlapStartMinutes)}–{minutesToTimeLabel(conflict.overlapEndMinutes)}. DailyNest can&apos;t decide which one you will attend.
-                      </li>
-                    );
-                  }
-                  if (conflict.type === "fixed_displacement") {
-                    const fixedDescriptions = conflict.fixedItemIndexes.map((itemIndex) => {
-                      const item = items.find((candidate) => candidate.originalIndex === itemIndex);
-                      return item
-                        ? `${item.title} is fixed from ${minutesToTimeLabel(hhmmToMinutes(item.fixedStart ?? "00:00"))}–${minutesToTimeLabel(hhmmToMinutes(item.fixedEnd ?? "00:00"))}`
-                        : null;
-                    }).filter(Boolean);
-                    const affectedNames = conflict.affectedItemIndexes.map(
-                      (itemIndex) => items.find((item) => item.originalIndex === itemIndex)?.title,
-                    ).filter(Boolean);
-                    return (
-                      <li key={`fixed-displacement-${index}`}>
-                        {fixedDescriptions.join("; ")}, so {affectedNames.join(" and ") || "important work"} could not all fit before {cutoffLabel}.
-                      </li>
-                    );
-                  }
-                  if (conflict.type === "due_today_unfit") {
-                    const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
-                    return (
-                      <li key={`due-${conflict.itemIndex}`}>
-                        <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> is due today{conflict.dueDate ? ` (${conflict.dueDate})` : ""} and still needs {formatDuration(conflict.remainingMinutes)}. Its due date has not changed, and it has not been marked complete.
-                      </li>
-                    );
-                  }
-                  if (conflict.type === "required_capacity") {
-                    return (
-                      <li key="required-capacity">
-                        {formatDuration(conflict.requiredMinutes)} is due or required today, but only {formatDuration(conflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(conflict.missingMinutes)} still needs time.
-                      </li>
-                    );
-                  }
-                  const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
-                  return (
-                    <li key={`overflow-${conflict.itemIndex}`}>
-                      <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> could not fully fit today and still needs {formatDuration(conflict.remainingMinutes)}.
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="mt-4 space-y-4">
+                {totalUnfit > 0 ? (
+                  <div className="rounded-xl border border-border bg-background/60 p-3">
+                    <p className="text-sm text-muted-foreground">
+                      {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      They&apos;ve been moved to Tomorrow — scroll down to edit them.
+                    </p>
+                    {affectedRows.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAffectedTasks((v) => !v)}
+                          className="flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                        >
+                          {showAffectedTasks ? "Hide affected tasks" : "Show affected tasks"}
+                          {showAffectedTasks ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        </button>
+                        {showAffectedTasks && (
+                          <ul className="mt-2 space-y-1.5">
+                            {affectedRows.map((row, i) => (
+                              <li key={i} className="flex items-center justify-between gap-3 text-sm">
+                                <span className="truncate text-foreground">{row.title}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{formatDuration(row.minutes)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    A few things need your attention. Review your plan to resolve them.
+                  </p>
+                )}
+              </div>
             )}
 
             {overlapConflicts.length > 0 ? (
