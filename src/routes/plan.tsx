@@ -634,10 +634,30 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       focusBlockMinutes: null,
       note: null,
     };
-    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
-    setUserOrder((o) => [...o, idx]);
+    const nextItems = items ? [...items, newItem] : [newItem];
+    const nextOrder = [...userOrder, idx];
+    // Test whether the new task fully fits before the cutoff.
+    const test = buildSchedule({
+      items: nextItems,
+      order: computeOrder(nextItems, nextOrder),
+      nowMinutes,
+      cutoffMinutes,
+    });
+    const scheduledForTask = test.schedule
+      .filter((entry) => entry.kind === "task" && entry.itemIndex === idx)
+      .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
+
+    setItems(nextItems);
+    setUserOrder(nextOrder);
     setAddMode(null);
-    flashStatus("Task added.");
+
+    if (scheduledForTask < duration) {
+      const availableMin = Math.max(0, scheduledForTask);
+      setCrowded({ itemIndex: idx, needMin: duration, availableMin });
+      flashStatus("Not enough time today — pick how to fit it.");
+    } else {
+      flashStatus("Task added.");
+    }
   };
 
   const submitAddBreak = () => {
