@@ -745,13 +745,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
                         onDragOver={isFlexible ? onDragOver : undefined}
                         onDrop={isFlexible && item ? onDrop(item.originalIndex) : undefined}
-                        className="group rounded-xl border border-border bg-card p-3 sm:p-4"
+                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
                       >
-                        <div className="flex items-start gap-3 sm:gap-4">
-                          <div className="flex flex-col items-center gap-1 shrink-0">
-                            <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center">
-                              {entry.kind === "fixed" ? <Calendar className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                            </div>
+                        <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
+                          <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
+                            {item ? (
+                              <button
+                                type="button"
+                                role="checkbox"
+                                aria-checked={completedTasks.has(item.originalIndex)}
+                                aria-label={completedTasks.has(item.originalIndex) ? `Mark ${entry.title} not done` : `Mark ${entry.title} done`}
+                                onClick={(e) => { e.stopPropagation(); toggleComplete(item.originalIndex); }}
+                                className={`h-5 w-5 rounded-md border transition-colors flex items-center justify-center ${completedTasks.has(item.originalIndex) ? "bg-primary/80 border-primary/80 text-primary-foreground" : "border-border bg-background hover:border-primary/60"}`}
+                              >
+                                {completedTasks.has(item.originalIndex) && <Check className="h-3.5 w-3.5" strokeWidth={2.5} />}
+                              </button>
+                            ) : (
+                              <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center">
+                                {entry.kind === "fixed" ? <Calendar className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
+                              </div>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
