@@ -1428,20 +1428,23 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
                         <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> overlap from {minutesToTimeLabel(overlap.overlapStartMinutes)}–{minutesToTimeLabel(overlap.overlapEndMinutes)}.
                       </p>
-                      {affectedRows.length > 0 && (
+                      {totalUnfit > 0 && (
                         <div className="rounded-xl border border-border bg-background/60 p-3">
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Also couldn&apos;t fit today</h4>
-                          <ul className="space-y-2">
-                            {affectedRows.map((row, i) => (
-                              <li key={`affected-${i}`} className="flex items-center justify-between text-sm">
-                                <span className="text-foreground">{row.title}</span>
-                                <span className="text-muted-foreground tabular-nums">{formatDuration(row.minutes)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                          <p className="mt-3 text-sm text-muted-foreground">
-                            {formatDuration(totalUnfit)} could not be scheduled before {cutoffLabel}.
+                          <p className="text-sm text-muted-foreground">
+                            Also, {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
                           </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowConflictModal(false);
+                              window.setTimeout(() => {
+                                document.getElementById("conflict-banner")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }, 50);
+                            }}
+                            className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            Review unscheduled tasks
+                          </button>
                         </div>
                       )}
                     </>
