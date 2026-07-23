@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2 } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
 import type { PlanItem, Priority } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
@@ -156,6 +156,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
   const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
+  const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
+  const toggleComplete = useCallback((idx: number) => {
+    setCompletedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }, []);
 
   const plan = useServerFn(planTasks);
 
@@ -737,13 +745,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
                         onDragOver={isFlexible ? onDragOver : undefined}
                         onDrop={isFlexible && item ? onDrop(item.originalIndex) : undefined}
-                        className="group rounded-xl border border-border bg-card p-3 sm:p-4"
+                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
                       >
-                        <div className="flex items-start gap-3 sm:gap-4">
-                          <div className="flex flex-col items-center gap-1 shrink-0">
-                            <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center">
-                              {entry.kind === "fixed" ? <Calendar className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                            </div>
+                        <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
+                          <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
+                            {item ? (
+                              <button
+                                type="button"
+                                role="checkbox"
+                                aria-checked={completedTasks.has(item.originalIndex)}
+                                aria-label={completedTasks.has(item.originalIndex) ? `Mark ${entry.title} not done` : `Mark ${entry.title} done`}
+                                onClick={(e) => { e.stopPropagation(); toggleComplete(item.originalIndex); }}
+                                className={`h-5 w-5 rounded-md border transition-colors flex items-center justify-center ${completedTasks.has(item.originalIndex) ? "bg-primary/80 border-primary/80 text-primary-foreground" : "border-border bg-background hover:border-primary/60"}`}
+                              >
+                                {completedTasks.has(item.originalIndex) && <Check className="h-3.5 w-3.5" strokeWidth={2.5} />}
+                              </button>
+                            ) : (
+                              <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center">
+                                {entry.kind === "fixed" ? <Calendar className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
+                              </div>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -761,7 +782,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                 <DueLabel label={entry.dueLabel} cat={item?.dueCategory ?? "none"} />
                               )}
                             </div>
-                            <div className="mt-1 text-sm font-medium text-foreground truncate">{entry.title}</div>
+                            <div className={`mt-1 text-sm font-medium text-foreground truncate ${item && completedTasks.has(item.originalIndex) ? "line-through decoration-1" : ""}`}>{entry.title}</div>
                             {entry.isFirstBlock && entry.totalDuration && (
                               <div className="mt-0.5 text-xs text-muted-foreground">
                                 Total: {formatDuration(entry.totalDuration)} ·{" "}
