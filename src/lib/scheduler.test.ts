@@ -48,7 +48,7 @@ describe("required-today planning", () => {
         .filter((entry) => entry.itemIndex === 0)
         .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0),
     ).toBe(60);
-    expect(result.requiredTodayConflict).toBeNull();
+    expect(result.conflicts).toHaveLength(0);
   });
 
   it("schedules required-today work before optional work is dropped", () => {
@@ -73,8 +73,8 @@ describe("required-today planning", () => {
     expect(result.schedule[0]).toEqual(
       expect.objectContaining({ itemIndex: 2, startMinutes: 1140, endMinutes: 1200 }),
     );
-    expect(result.attention.some((entry) => entry.itemIndex === 0 || entry.itemIndex === 1)).toBe(
-      true,
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({ type: "task_overflow", itemIndex: 1 }),
     );
     expect(result.tomorrow.some((entry) => entry.itemIndex === 2)).toBe(false);
   });
@@ -95,13 +95,13 @@ describe("required-today planning", () => {
       cutoffMinutes: 22 * 60,
     });
 
-    expect(result.requiredTodayConflict).toEqual({
-      requiredMinutes: 240,
-      scheduledMinutes: 180,
-      missingMinutes: 60,
-    });
-    expect(result.attention).toContainEqual(
-      expect.objectContaining({ itemIndex: 0, remainingMinutes: 60 }),
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({
+        type: "required_capacity",
+        requiredMinutes: 240,
+        scheduledMinutes: 180,
+        missingMinutes: 60,
+      }),
     );
     expect(result.tomorrow).toHaveLength(0);
   });
@@ -176,15 +176,20 @@ describe("required-today planning", () => {
     });
 
     expect(items[0].dueDate).toBe("2026-07-17");
-    expect(result.attention).toEqual([
-      expect.objectContaining({ itemIndex: 0, remainingMinutes: 45 }),
-    ]);
-    expect(result.tomorrow).toHaveLength(0);
-    expect(result.requiredTodayConflict).toEqual({
-      requiredMinutes: 45,
-      scheduledMinutes: 0,
-      missingMinutes: 45,
-    });
+    expect(result.tomorrow).toContainEqual(
+      expect.objectContaining({
+        itemIndex: 0,
+        remainingMinutes: 45,
+        dueLabel: "Due today",
+        reason: "Couldn't fit today",
+      }),
+    );
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({ type: "due_today_unfit", itemIndex: 0, remainingMinutes: 45 }),
+    );
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({ type: "required_capacity", missingMinutes: 45 }),
+    );
   });
 
   it("never lists a partially scheduled task in both Today and Tomorrow", () => {
@@ -197,7 +202,9 @@ describe("required-today planning", () => {
     });
 
     expect(result.schedule.some((entry) => entry.itemIndex === 0)).toBe(true);
-    expect(result.attention).toContainEqual(expect.objectContaining({ itemIndex: 0, remainingMinutes: 30 }));
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({ type: "task_overflow", itemIndex: 0, remainingMinutes: 30 }),
+    );
     expect(result.tomorrow.some((entry) => entry.itemIndex === 0)).toBe(false);
   });
 
@@ -228,5 +235,141 @@ describe("required-today planning", () => {
     expect(result.schedule.some((entry) => entry.kind === "break")).toBe(true);
     expect(result.scheduledMinutes).toBe(visibleMinutes);
     expect(result.scheduledMinutes).toBe(215);
+  });
+
+  it("returns validated capacity and fixed-displacement conflicts with the final plan", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Write lab report",
+        durationMinutes: 120,
+        priority: "high",
+        dueDate: "2026-07-17",
+        dueLabel: "Due today",
+        dueCategory: "today",
+      }),
+      task({
+        originalIndex: 1,
+        title: "Email teacher",
+        durationMinutes: 80,
+        priority: "high",
+        dueDate: "2026-07-17",
+        dueLabel: "Due today",
+        dueCategory: "today",
+      }),
+      task({
+        originalIndex: 2,
+        title: "Orchestra",
+        durationMinutes: 120,
+        priority: "high",
+        isFixed: true,
+        fixedStart: "18:15",
+        fixedEnd: "20:15",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 17 * 60,
+      cutoffMinutes: 22 * 60,
+    });
+    const emailScheduled = result.schedule
+      .filter((entry) => entry.itemIndex === 1)
+      .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
+
+    expect(items[1].dueDate).toBe("2026-07-17");
+    expect(emailScheduled).toBe(60);
+    expect(result.tomorrow.some((entry) => entry.itemIndex === 1)).toBe(false);
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({
+        type: "due_today_unfit",
+        itemIndex: 1,
+        remainingMinutes: 20,
+      }),
+    );
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({
+        type: "fixed_displacement",
+        fixedItemIndexes: [2],
+        affectedItemIndexes: [1],
+        blockedMinutes: 120,
+      }),
+    );
+  });
+
+  it("detects an exact fixed overlap and blocks flexible work across the union", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Flexible task",
+        durationMinutes: 180,
+        priority: "high",
+        dueDate: "2026-07-17",
+        dueLabel: "Due today",
+        dueCategory: "today",
+      }),
+      task({
+        originalIndex: 1,
+        title: "AI Class",
+        durationMinutes: 150,
+        priority: "high",
+        isFixed: true,
+        fixedStart: "16:30",
+        fixedEnd: "19:00",
+      }),
+      task({
+        originalIndex: 2,
+        title: "Orchestra Practice",
+        durationMinutes: 120,
+        priority: "high",
+        isFixed: true,
+        fixedStart: "18:15",
+        fixedEnd: "20:15",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 16 * 60,
+      cutoffMinutes: 22 * 60,
+    });
+    const flexibleBlocks = result.schedule.filter((entry) => entry.itemIndex === 0);
+
+    expect(result.conflicts[0]).toEqual({
+      type: "fixed_overlap",
+      firstItemIndex: 1,
+      secondItemIndex: 2,
+      overlapStartMinutes: 18 * 60 + 15,
+      overlapEndMinutes: 19 * 60,
+    });
+    expect(result.conflicts).toContainEqual(
+      expect.objectContaining({ type: "fixed_displacement", blockedMinutes: 225 }),
+    );
+    expect(result.schedule.find((entry) => entry.itemIndex === 1)).toEqual(
+      expect.objectContaining({ startMinutes: 16 * 60 + 30, endMinutes: 19 * 60 }),
+    );
+    expect(result.schedule.find((entry) => entry.itemIndex === 2)).toEqual(
+      expect.objectContaining({ startMinutes: 18 * 60 + 15, endMinutes: 20 * 60 + 15 }),
+    );
+    expect(
+      result.schedule
+        .filter((entry) => entry.kind !== "fixed")
+        .every(
+        (entry) => entry.endMinutes <= 16 * 60 + 30 || entry.startMinutes >= 20 * 60 + 15,
+      ),
+    ).toBe(true);
+
+    const editedItems = items.map((item) =>
+      item.originalIndex === 1
+        ? { ...item, fixedEnd: "18:00", durationMinutes: 90 }
+        : item,
+    );
+    const rebuilt = buildSchedule({
+      items: editedItems,
+      order: computeOrder(editedItems, []),
+      nowMinutes: 16 * 60,
+      cutoffMinutes: 22 * 60,
+    });
+    expect(rebuilt.conflicts.some((conflict) => conflict.type === "fixed_overlap")).toBe(false);
   });
 });

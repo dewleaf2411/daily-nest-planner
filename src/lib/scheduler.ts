@@ -1,4 +1,9 @@
-import type { PlanItem, ScheduleEntry, TomorrowEntry } from "./planner.types";
+import type {
+  PlanItem,
+  ScheduleEntry,
+  SchedulingConflict,
+  TomorrowEntry,
+} from "./planner.types";
 
 function hhmmToMinutes(s: string): number {
   const [h, m] = s.split(":").map((n) => parseInt(n, 10));
@@ -29,117 +34,135 @@ export function formatDuration(mins: number): string {
 
 export interface BuildOptions {
   items: PlanItem[];
-  order: number[]; // ordered originalIndex values for flexible tasks (today)
+  order: number[];
   nowMinutes: number;
   cutoffMinutes: number;
 }
 
 export interface BuildResult {
   schedule: ScheduleEntry[];
-  attention: TomorrowEntry[];
   tomorrow: TomorrowEntry[];
+  conflicts: SchedulingConflict[];
   scheduledMinutes: number;
-  requiredTodayConflict: {
-    requiredMinutes: number;
-    scheduledMinutes: number;
-    missingMinutes: number;
-  } | null;
+}
+
+interface FixedSlot {
+  item: PlanItem;
+  start: number;
+  end: number;
+}
+
+interface OccupiedSlot {
+  start: number;
+  end: number;
+}
+
+function mergeOccupiedTime(fixed: FixedSlot[]): OccupiedSlot[] {
+  const merged: OccupiedSlot[] = [];
+  for (const slot of fixed) {
+    const last = merged[merged.length - 1];
+    if (last && slot.start <= last.end) {
+      last.end = Math.max(last.end, slot.end);
+    } else {
+      merged.push({ start: slot.start, end: slot.end });
+    }
+  }
+  return merged;
 }
 
 export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: BuildOptions): BuildResult {
-  const byIdx = new Map(items.map((i) => [i.originalIndex, i]));
+  const byIdx = new Map(items.map((item) => [item.originalIndex, item]));
   const schedule: ScheduleEntry[] = [];
-  const attention: TomorrowEntry[] = [];
   const tomorrow: TomorrowEntry[] = [];
 
-  // fixed commitments
   const fixed = items
-    .filter((i) => i.isFixed && i.fixedStart && i.suggestedDay === "today")
-    .map((i) => {
-      const start = hhmmToMinutes(i.fixedStart!);
-      const end = i.fixedEnd ? hhmmToMinutes(i.fixedEnd) : start + i.durationMinutes;
-      return { item: i, start, end };
+    .filter((item) => item.isFixed && item.fixedStart && item.suggestedDay === "today")
+    .map((item) => {
+      const start = hhmmToMinutes(item.fixedStart!);
+      const requestedEnd = item.fixedEnd ? hhmmToMinutes(item.fixedEnd) : start + item.durationMinutes;
+      return { item, start, end: requestedEnd > start ? requestedEnd : start + item.durationMinutes };
     })
-    .sort((a, b) => a.start - b.start);
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const occupied = mergeOccupiedTime(fixed);
 
-  for (const f of fixed) {
+  for (const slot of fixed) {
     schedule.push({
-      id: `fixed-${f.item.originalIndex}`,
-      itemIndex: f.item.originalIndex,
+      id: `fixed-${slot.item.originalIndex}`,
+      itemIndex: slot.item.originalIndex,
       kind: "fixed",
-      title: f.item.title,
-      startMinutes: f.start,
-      endMinutes: f.end,
+      title: slot.item.title,
+      startMinutes: slot.start,
+      endMinutes: slot.end,
       isFirstBlock: true,
-      totalDuration: f.item.durationMinutes,
-      priority: f.item.priority,
-      dueLabel: f.item.dueLabel ?? null,
+      totalDuration: slot.end - slot.start,
+      priority: slot.item.priority,
+      dueLabel: slot.item.dueLabel ?? null,
       isFixed: true,
     });
   }
 
-  // Required-today work always goes first. A user may reorder the remaining work,
-  // but optional work must not displace an explicit same-day commitment.
   const flexibleQueue: PlanItem[] = [];
   const queued = new Set<number>();
   for (const idx of order) {
-    const it = byIdx.get(idx);
-    if (!it) continue;
-    if (it.isFixed) continue;
-    if (it.suggestedDay !== "today") continue;
-    if (queued.has(it.originalIndex)) continue;
-    flexibleQueue.push(it);
-    queued.add(it.originalIndex);
+    const item = byIdx.get(idx);
+    if (!item || item.isFixed || item.suggestedDay !== "today" || queued.has(idx)) continue;
+    flexibleQueue.push(item);
+    queued.add(idx);
   }
   for (const item of items) {
-    if (!item.isFixed && item.suggestedDay === "today" && !queued.has(item.originalIndex)) flexibleQueue.push(item);
+    if (!item.isFixed && item.suggestedDay === "today" && !queued.has(item.originalIndex)) {
+      flexibleQueue.push(item);
+    }
   }
-  flexibleQueue.sort((a, b) => Number(b.requiredToday) - Number(a.requiredToday));
+  flexibleQueue.sort(
+    (a, b) =>
+      Number(b.requiredToday || b.dueCategory === "today") -
+      Number(a.requiredToday || a.dueCategory === "today"),
+  );
 
-  // Also anything suggested tomorrow explicitly goes to tomorrow
-  for (const it of items) {
-    if (!it.isFixed && it.suggestedDay === "tomorrow") {
-      const destination = (it.requiredToday || it.dueCategory === "today") && !it.deferredByUser ? attention : tomorrow;
-      destination.push({
-        itemIndex: it.originalIndex,
-        title: it.title,
-        remainingMinutes: it.durationMinutes,
-        priority: it.priority,
-        dueLabel: it.dueLabel ?? null,
-        reason: it.note ?? undefined,
+  for (const item of items) {
+    if (!item.isFixed && item.suggestedDay === "tomorrow") {
+      tomorrow.push({
+        itemIndex: item.originalIndex,
+        title: item.title,
+        remainingMinutes: item.durationMinutes,
+        priority: item.priority,
+        dueLabel: item.dueLabel ?? null,
+        reason: item.dueCategory === "today" ? "Couldn't fit today" : item.note ?? undefined,
       });
     }
   }
 
   let cursor = roundUpTo5(Math.max(nowMinutes, 0));
 
-  const placeBlock = (item: PlanItem, remaining: number, blockNum: number, totalBlocks: number, firstBlockDuration?: number): { placed: number; overflow: number } => {
-    // find gap that doesn't collide with fixed
+  const placeBlock = (
+    item: PlanItem,
+    remaining: number,
+    blockNum: number,
+    totalBlocks: number,
+    firstBlockDuration?: number,
+  ): { placed: number; overflow: number } => {
     while (cursor < cutoffMinutes) {
-      const nextFixed = fixed.find((f) => f.start >= cursor && f.start < cutoffMinutes);
-      const wallEnd = nextFixed ? nextFixed.start : cutoffMinutes;
-      if (cursor >= wallEnd) {
-        if (nextFixed) {
-          cursor = roundUpTo5(nextFixed.end);
-          continue;
-        }
-        return { placed: 0, overflow: remaining };
-      }
-      const available = wallEnd - cursor;
-      if (available <= 0) {
-        if (nextFixed) {
-          cursor = roundUpTo5(nextFixed.end);
-          continue;
-        }
-        return { placed: 0, overflow: remaining };
-      }
-      const desired = item.focusBlockMinutes && !item.isFixed ? Math.min(item.focusBlockMinutes, remaining) : remaining;
-      // Keep a requested focus block whole when a fixed commitment is the only
-      // thing making the current gap too short. Resume after the commitment.
-      if (nextFixed && available < desired) {
-        cursor = roundUpTo5(nextFixed.end);
+      const nextOccupied = occupied.find(
+        (slot) => slot.end > cursor && slot.start < cutoffMinutes,
+      );
+      if (nextOccupied && cursor >= nextOccupied.start) {
+        cursor = roundUpTo5(nextOccupied.end);
         continue;
       }
+
+      const wallEnd = nextOccupied ? nextOccupied.start : cutoffMinutes;
+      const available = wallEnd - cursor;
+      if (available <= 0) return { placed: 0, overflow: remaining };
+
+      const desired = item.focusBlockMinutes
+        ? Math.min(item.focusBlockMinutes, remaining)
+        : remaining;
+      if (item.focusBlockMinutes && nextOccupied && available < desired) {
+        cursor = roundUpTo5(nextOccupied.end);
+        continue;
+      }
+
       const take = Math.min(desired, available);
       if (take <= 0) return { placed: 0, overflow: remaining };
       const start = cursor;
@@ -165,115 +188,215 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     return { placed: 0, overflow: remaining };
   };
 
-  const requiredTodayMinutes = items
-    .filter((item) => !item.isFixed && !item.deferredByUser && (item.requiredToday || item.dueCategory === "today"))
-    .reduce((total, item) => total + item.durationMinutes, 0);
-  let scheduledRequiredTodayMinutes = 0;
-
   for (const item of flexibleQueue) {
     let remaining = item.durationMinutes;
-    const blocksTotal = item.focusBlockMinutes ? Math.ceil(item.durationMinutes / item.focusBlockMinutes) : 1;
+    const blocksTotal = item.focusBlockMinutes
+      ? Math.ceil(item.durationMinutes / item.focusBlockMinutes)
+      : 1;
     let blockNum = 0;
     let placedAny = false;
-    const originalTotal = item.durationMinutes;
 
     while (remaining > 0 && cursor < cutoffMinutes) {
-      blockNum++;
+      blockNum += 1;
       const beforeCursor = cursor;
-      const { placed, overflow } = placeBlock(item, remaining, blockNum, blocksTotal, originalTotal);
+      const { placed, overflow } = placeBlock(
+        item,
+        remaining,
+        blockNum,
+        blocksTotal,
+        item.durationMinutes,
+      );
       if (placed === 0) break;
       placedAny = true;
-      if (item.requiredToday || item.dueCategory === "today") scheduledRequiredTodayMinutes += placed;
       remaining = overflow;
-      // break between focus blocks
+
       if (remaining > 0 && item.focusBlockMinutes) {
         const breakStart = cursor;
         const breakEnd = cursor + 5;
-        if (breakEnd <= cutoffMinutes) {
-          const nextFixed = fixed.find((f) => f.start >= cursor && f.start < cutoffMinutes);
-          if (!nextFixed || breakEnd <= nextFixed.start) {
-            schedule.push({
-              id: `br-${item.originalIndex}-${blockNum}`,
-              itemIndex: -1,
-              kind: "break",
-              title: "Short break",
-              startMinutes: breakStart,
-              endMinutes: breakEnd,
-            });
-            cursor = breakEnd;
-          }
+        const collidesWithFixed = occupied.some(
+          (slot) => slot.start < breakEnd && slot.end > breakStart,
+        );
+        if (breakEnd <= cutoffMinutes && !collidesWithFixed) {
+          schedule.push({
+            id: `br-${item.originalIndex}-${blockNum}`,
+            itemIndex: -1,
+            kind: "break",
+            title: "Short break",
+            startMinutes: breakStart,
+            endMinutes: breakEnd,
+          });
+          cursor = breakEnd;
         }
       }
       if (beforeCursor === cursor) break;
     }
 
-    if (remaining > 0) {
-      const destination = placedAny || item.requiredToday || item.dueCategory === "today" ? attention : tomorrow;
-      destination.push({
+    if (remaining > 0 && !placedAny) {
+      tomorrow.push({
         itemIndex: item.originalIndex,
         title: item.title,
         remainingMinutes: remaining,
         priority: item.priority,
         dueLabel: item.dueLabel ?? null,
-        reason: placedAny ? "Overflow from today" : "Didn't fit today",
+        reason: "Couldn't fit today",
       });
     }
   }
 
-  schedule.sort((a, b) => a.startMinutes - b.startMinutes);
-  // Fill leftover gaps between entries with a longer break so the day
-  // doesn't have empty dead space before a fixed commitment.
-  const GAP_THRESHOLD = 10; // minutes
+  schedule.sort((a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes);
   const filled: ScheduleEntry[] = [];
-  for (let i = 0; i < schedule.length; i++) {
-    const cur = schedule[i];
-    filled.push(cur);
+  const gapThreshold = 10;
+  let coveredUntil = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < schedule.length; i += 1) {
+    const current = schedule[i];
+    filled.push(current);
+    coveredUntil = Math.max(coveredUntil, current.endMinutes);
     const next = schedule[i + 1];
     if (!next) continue;
-    const gap = next.startMinutes - cur.endMinutes;
-    if (gap >= GAP_THRESHOLD) {
+    const gap = next.startMinutes - coveredUntil;
+    if (gap >= gapThreshold) {
       filled.push({
-        id: `gap-${cur.endMinutes}-${next.startMinutes}`,
+        id: `gap-${coveredUntil}-${next.startMinutes}`,
         itemIndex: -1,
         kind: "break",
         title: gap >= 30 ? "Rest & recharge" : "Breather",
-        startMinutes: cur.endMinutes,
+        startMinutes: coveredUntil,
         endMinutes: next.startMinutes,
       });
     }
   }
 
-  const scheduledMinutes = filled.reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
-  const missingMinutes = requiredTodayMinutes - scheduledRequiredTodayMinutes;
-  return {
-    schedule: filled,
-    attention,
-    tomorrow,
-    scheduledMinutes,
-    requiredTodayConflict:
-      missingMinutes > 0
-        ? { requiredMinutes: requiredTodayMinutes, scheduledMinutes: scheduledRequiredTodayMinutes, missingMinutes }
-        : null,
-  };
+  const scheduledTaskMinutes = new Map<number, number>();
+  for (const entry of filled) {
+    if (entry.kind !== "task") continue;
+    scheduledTaskMinutes.set(
+      entry.itemIndex,
+      (scheduledTaskMinutes.get(entry.itemIndex) ?? 0) + entry.endMinutes - entry.startMinutes,
+    );
+  }
+
+  const remainingByItem = new Map<number, number>();
+  for (const item of items) {
+    if (item.isFixed) continue;
+    const scheduledForToday = scheduledTaskMinutes.get(item.originalIndex) ?? 0;
+    const remaining = Math.max(0, item.durationMinutes - scheduledForToday);
+    if (remaining > 0) remainingByItem.set(item.originalIndex, remaining);
+  }
+
+  const conflicts: SchedulingConflict[] = [];
+  for (let first = 0; first < fixed.length; first += 1) {
+    for (let second = first + 1; second < fixed.length; second += 1) {
+      const overlapStart = Math.max(fixed[first].start, fixed[second].start);
+      const overlapEnd = Math.min(fixed[first].end, fixed[second].end);
+      if (overlapStart < overlapEnd) {
+        conflicts.push({
+          type: "fixed_overlap",
+          firstItemIndex: fixed[first].item.originalIndex,
+          secondItemIndex: fixed[second].item.originalIndex,
+          overlapStartMinutes: overlapStart,
+          overlapEndMinutes: overlapEnd,
+        });
+      }
+    }
+  }
+
+  const importantItems = items.filter(
+    (item) => !item.isFixed && (item.requiredToday || item.dueCategory === "today"),
+  );
+  const affectedImportantItems = importantItems.filter(
+    (item) => (remainingByItem.get(item.originalIndex) ?? 0) > 0,
+  );
+  const windowStart = roundUpTo5(Math.max(nowMinutes, 0));
+  const blockedMinutes = occupied.reduce(
+    (total, slot) =>
+      total + Math.max(0, Math.min(slot.end, cutoffMinutes) - Math.max(slot.start, windowStart)),
+    0,
+  );
+  if (affectedImportantItems.length > 0 && blockedMinutes > 0) {
+    conflicts.push({
+      type: "fixed_displacement",
+      fixedItemIndexes: fixed
+        .filter((slot) => slot.end > windowStart && slot.start < cutoffMinutes)
+        .map((slot) => slot.item.originalIndex),
+      affectedItemIndexes: affectedImportantItems.map((item) => item.originalIndex),
+      blockedMinutes,
+    });
+  }
+
+  for (const item of items) {
+    const remaining = remainingByItem.get(item.originalIndex) ?? 0;
+    if (!item.isFixed && item.dueCategory === "today" && remaining > 0) {
+      conflicts.push({
+        type: "due_today_unfit",
+        itemIndex: item.originalIndex,
+        dueDate: item.dueDate ?? null,
+        remainingMinutes: remaining,
+      });
+    }
+  }
+
+  const requiredMinutes = importantItems.reduce(
+    (total, item) => total + item.durationMinutes,
+    0,
+  );
+  const scheduledRequiredMinutes = importantItems.reduce(
+    (total, item) => total + Math.min(item.durationMinutes, scheduledTaskMinutes.get(item.originalIndex) ?? 0),
+    0,
+  );
+  const missingRequiredMinutes = requiredMinutes - scheduledRequiredMinutes;
+  if (missingRequiredMinutes > 0) {
+    conflicts.push({
+      type: "required_capacity",
+      affectedItemIndexes: affectedImportantItems.map((item) => item.originalIndex),
+      requiredMinutes,
+      scheduledMinutes: scheduledRequiredMinutes,
+      missingMinutes: missingRequiredMinutes,
+    });
+  }
+
+  for (const item of items) {
+    const scheduled = scheduledTaskMinutes.get(item.originalIndex) ?? 0;
+    const remaining = remainingByItem.get(item.originalIndex) ?? 0;
+    if (
+      !item.isFixed &&
+      item.dueCategory !== "today" &&
+      !item.requiredToday &&
+      scheduled > 0 &&
+      remaining > 0
+    ) {
+      conflicts.push({ type: "task_overflow", itemIndex: item.originalIndex, remainingMinutes: remaining });
+    }
+  }
+
+  const scheduledMinutes = filled.reduce(
+    (total, entry) => total + entry.endMinutes - entry.startMinutes,
+    0,
+  );
+  return { schedule: filled, tomorrow, conflicts, scheduledMinutes };
 }
 
 export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
-  // userOrder is the current user-defined order of flexible-today task indices
-  // add any missing flexible-today items appended by priority then originalIndex
   const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const flexToday = items
-    .filter((i) => !i.isFixed && i.suggestedDay === "today")
-    .map((i) => i.originalIndex);
-  const requiredToday = flexToday.filter((index) => items.find((item) => item.originalIndex === index)?.requiredToday);
-  const seen = new Set(userOrder.filter((i) => flexToday.includes(i) && !requiredToday.includes(i)));
+    .filter((item) => !item.isFixed && item.suggestedDay === "today")
+    .map((item) => item.originalIndex);
+  const importantToday = flexToday.filter((index) => {
+    const item = items.find((candidate) => candidate.originalIndex === index);
+    return item?.requiredToday || item?.dueCategory === "today";
+  });
+  const seen = new Set(
+    userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
+  );
   const rest = flexToday
-    .filter((i) => !seen.has(i) && !requiredToday.includes(i))
+    .filter((index) => !seen.has(index) && !importantToday.includes(index))
     .sort((a, b) => {
-      const ia = items.find((x) => x.originalIndex === a)!;
-      const ib = items.find((x) => x.originalIndex === b)!;
-      const p = priorityRank[ia.priority] - priorityRank[ib.priority];
-      if (p !== 0) return p;
-      return ia.originalIndex - ib.originalIndex;
+      const first = items.find((item) => item.originalIndex === a)!;
+      const second = items.find((item) => item.originalIndex === b)!;
+      return priorityRank[first.priority] - priorityRank[second.priority] || a - b;
     });
-  return [...requiredToday, ...userOrder.filter((i) => flexToday.includes(i) && !requiredToday.includes(i)), ...rest];
+  return [
+    ...importantToday,
+    ...userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
+    ...rest,
+  ];
 }

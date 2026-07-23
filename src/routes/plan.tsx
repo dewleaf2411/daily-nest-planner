@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
-import type { PlanItem, Priority } from "@/lib/planner.types";
+import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
@@ -108,6 +108,10 @@ function FixedPill() {
   return <span className="inline-flex items-center rounded-full bg-fixed text-fixed-fg px-2 py-0.5 text-xs font-medium">Fixed time</span>;
 }
 
+function OverlapPill() {
+  return <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">Overlaps another commitment</span>;
+}
+
 function DueLabel({ label, cat }: { label: string; cat: PlanItem["dueCategory"] }) {
   const cls =
     cat === "overdue" || cat === "today"
@@ -122,6 +126,8 @@ interface EditForm {
   title: string;
   dueDate: string;
   durationMinutes: number;
+  fixedStart: string;
+  fixedEnd: string;
 }
 
 interface CrowdedProposal {
@@ -161,7 +167,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [undoIdx, setUndoIdx] = useState<number | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const [confirmNewPlan, setConfirmNewPlan] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(false);
   const hydratedRef = useRef(false);
+  const presentedConflictKeyRef = useRef("");
+  const stopTimeControlRef = useRef<HTMLDivElement | null>(null);
   const toggleComplete = useCallback((idx: number) => {
     setCompletedTasks((prev) => {
       const next = new Set(prev);
@@ -280,6 +289,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setUndoIdx(null);
     setStatus(null);
     setError(null);
+    setShowConflictModal(false);
+    presentedConflictKeyRef.current = "";
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     try { localStorage.removeItem(PLAN_STORAGE_KEY); } catch { /* ignore */ }
     setConfirmNewPlan(false);
@@ -298,10 +309,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   const order = useMemo(() => (items ? computeOrder(items, userOrder) : []), [items, userOrder]);
 
-  const { schedule, attention, tomorrow, scheduledMinutes, requiredTodayConflict } = useMemo(() => {
-    if (!items) return { schedule: [], attention: [], tomorrow: [], scheduledMinutes: 0, requiredTodayConflict: null };
+  const { schedule, tomorrow, conflicts, scheduledMinutes } = useMemo(() => {
+    if (!items) return { schedule: [], tomorrow: [], conflicts: [], scheduledMinutes: 0 };
     return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
   }, [items, order, nowMinutes, cutoffMinutes]);
+
+  useEffect(() => {
+    if (
+      !items ||
+      loading ||
+      conflicts.length === 0 ||
+      crowded ||
+      showGuestCard ||
+      confirmNewPlan ||
+      presentedConflictKeyRef.current === "shown"
+    ) {
+      return;
+    }
+    presentedConflictKeyRef.current = "shown";
+    setShowConflictModal(true);
+  }, [conflicts.length, confirmNewPlan, crowded, items, loading, showGuestCard]);
 
   const pushHistory = () => {
     if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil };
@@ -366,6 +393,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             note: null,
           };
         });
+      setShowConflictModal(false);
+      presentedConflictKeyRef.current = "";
       setItems([...res.items, ...commitmentItems]);
       setUserOrder([]);
       setUsedFallback(res.usedFallback);
@@ -415,23 +444,48 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const it = items?.find((i) => i.originalIndex === idx);
     if (!it) return;
     setEditingIdx(idx);
-    setEditForm({ title: it.title, dueDate: it.dueDate ?? "", durationMinutes: it.durationMinutes });
+    setEditForm({
+      title: it.title,
+      dueDate: it.dueDate ?? "",
+      durationMinutes: it.durationMinutes,
+      fixedStart: it.fixedStart ?? "",
+      fixedEnd: it.fixedEnd ?? "",
+    });
   };
 
   const saveEdit = () => {
     if (editingIdx === null || !editForm) return;
+    const editingItem = items?.find((item) => item.originalIndex === editingIdx);
+    if (
+      editingItem?.isFixed &&
+      (!editForm.fixedStart ||
+        !editForm.fixedEnd ||
+        hhmmToMinutes(editForm.fixedEnd) <= hhmmToMinutes(editForm.fixedStart))
+    ) {
+      flashStatus("Choose an end time after the start time.");
+      return;
+    }
     pushHistory();
     updateItems((prev) =>
       prev.map((it) => {
         if (it.originalIndex !== editingIdx) return it;
         const { label, cat } = friendly(editForm.dueDate || null);
+        const fixedStart = it.isFixed ? editForm.fixedStart || it.fixedStart : it.fixedStart;
+        const fixedEnd = it.isFixed ? editForm.fixedEnd || it.fixedEnd : it.fixedEnd;
+        const fixedDuration =
+          it.isFixed && fixedStart && fixedEnd
+            ? Math.max(5, hhmmToMinutes(fixedEnd) - hhmmToMinutes(fixedStart))
+            : null;
         return {
           ...it,
           title: editForm.title.trim() || it.title,
           dueDate: editForm.dueDate || null,
           dueLabel: label,
           dueCategory: cat,
-          durationMinutes: Math.max(5, Math.round(editForm.durationMinutes / 5) * 5),
+          durationMinutes:
+            fixedDuration ?? Math.max(5, Math.round(editForm.durationMinutes / 5) * 5),
+          fixedStart,
+          fixedEnd,
         };
       }),
     );
@@ -474,10 +528,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       nowMinutes,
       cutoffMinutes,
     });
-    const overflow = test.tomorrow.find((t) => t.itemIndex === idx);
+    const scheduledForTask = test.schedule
+      .filter((entry) => entry.kind === "task" && entry.itemIndex === idx)
+      .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
     const needMin = it.durationMinutes;
     const availableMin = Math.max(0, cutoffMinutes - Math.max(nowMinutes, 0));
-    if (overflow && overflow.remainingMinutes > 0) {
+    if (scheduledForTask < it.durationMinutes) {
       setCrowded({ itemIndex: idx, needMin, availableMin });
     } else {
       pushHistory();
@@ -524,7 +580,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     updateItems((prev) => prev.map((x) => (x.originalIndex === crowded.itemIndex ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
     setUserOrder((o) => [...o, crowded.itemIndex]);
     setCrowded(null);
-    flashStatus("Placed as much as fits today; the rest needs attention.");
+    flashStatus("Placed as much as fits today; the remaining time stays flagged.");
   };
 
   const undo = () => {
@@ -655,6 +711,66 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   });
 
   const cutoffLabel = minutesToTimeLabel(cutoffMinutes);
+  const overlapConflicts = conflicts.filter(
+    (conflict): conflict is Extract<SchedulingConflict, { type: "fixed_overlap" }> =>
+      conflict.type === "fixed_overlap",
+  );
+  const dueTodayConflicts = conflicts.filter(
+    (conflict): conflict is Extract<SchedulingConflict, { type: "due_today_unfit" }> =>
+      conflict.type === "due_today_unfit",
+  );
+  const capacityConflict = conflicts.find(
+    (conflict): conflict is Extract<SchedulingConflict, { type: "required_capacity" }> =>
+      conflict.type === "required_capacity",
+  );
+  const dueTodayRemaining = dueTodayConflicts.reduce(
+    (total, conflict) => total + conflict.remainingMinutes,
+    0,
+  );
+  const overflowRemaining = conflicts
+    .filter((conflict): conflict is Extract<SchedulingConflict, { type: "task_overflow" }> =>
+      conflict.type === "task_overflow",
+    )
+    .reduce((total, conflict) => total + conflict.remainingMinutes, 0);
+  const overlappingFixedIndexes = new Set(
+    overlapConflicts.flatMap((conflict) => [conflict.firstItemIndex, conflict.secondItemIndex]),
+  );
+  const firstAffectedItemIndex = (() => {
+    const overlap = overlapConflicts[0];
+    if (overlap) return overlap.firstItemIndex;
+    const dueToday = dueTodayConflicts[0];
+    if (dueToday) return dueToday.itemIndex;
+    const capacity = capacityConflict?.affectedItemIndexes[0];
+    if (capacity !== undefined) return capacity;
+    const overflow = conflicts.find(
+      (conflict): conflict is Extract<SchedulingConflict, { type: "task_overflow" }> =>
+        conflict.type === "task_overflow",
+    );
+    return overflow?.itemIndex ?? null;
+  })();
+
+  const scrollToItem = (itemIndex: number) => {
+    window.setTimeout(() => {
+      const target =
+        document.getElementById(`tomorrow-item-${itemIndex}`) ??
+        document.getElementById(`plan-item-${itemIndex}`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+  };
+
+  const editConflictItem = (itemIndex: number) => {
+    setShowConflictModal(false);
+    startEdit(itemIndex);
+    scrollToItem(itemIndex);
+  };
+
+  const focusStopTime = () => {
+    setShowConflictModal(false);
+    window.setTimeout(() => {
+      stopTimeControlRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      stopTimeControlRef.current?.querySelector<HTMLElement>("button, input")?.focus();
+    }, 0);
+  };
 
   return (
     <main className="relative min-h-screen w-full overflow-hidden px-4 py-10 sm:py-16">
@@ -735,7 +851,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div ref={stopTimeControlRef} className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <WheelTimePicker
                 id="until"
                 value={availableUntil}
@@ -801,9 +917,20 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <p className="mt-3 text-xs text-muted-foreground">Using a local demo plan (no AI key needed).</p>
               )}
 
-              {requiredTodayConflict && (
+              {conflicts.length > 0 && (
                 <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
-                  There isn&apos;t enough time to finish everything due or needed today before {cutoffLabel}. {formatDuration(requiredTodayConflict.scheduledMinutes)} fits, and {formatDuration(requiredTodayConflict.missingMinutes)} still needs time.
+                  {overlapConflicts.length > 0 && (
+                    <span>{overlapConflicts.length} unresolved fixed-time overlap{overlapConflicts.length === 1 ? "" : "s"}. </span>
+                  )}
+                  {dueTodayRemaining > 0 && (
+                    <span>{formatDuration(dueTodayRemaining)} of due-today work still needs time.</span>
+                  )}
+                  {overlapConflicts.length === 0 && dueTodayRemaining === 0 && capacityConflict && (
+                    <span>{formatDuration(capacityConflict.missingMinutes)} of required work still needs time.</span>
+                  )}
+                  {overlapConflicts.length === 0 && dueTodayRemaining === 0 && !capacityConflict && overflowRemaining > 0 && (
+                    <span>{formatDuration(overflowRemaining)} of planned work still needs time.</span>
+                  )}
                 </div>
               )}
 
@@ -812,7 +939,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               )}
 
               {scheduleWithMeta.length === 0 ? (
-                <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — see Needs attention or Tomorrow below.</p>
+                <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
                 <ol className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }) => {
@@ -841,6 +968,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     const isFlexible = entry.kind === "task";
                     return (
                       <li
+                        id={item && (entry.kind === "fixed" || entry.isFirstBlock) ? `plan-item-${item.originalIndex}` : undefined}
                         key={entry.id}
                         draggable={isFlexible && !isEditing}
                         onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
@@ -879,6 +1007,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               )}
                               {entry.priority && <PriorityPill p={entry.priority} />}
                               {entry.isFixed && <FixedPill />}
+                              {entry.isFixed && item && overlappingFixedIndexes.has(item.originalIndex) && <OverlapPill />}
                               {entry.dueLabel && entry.isFirstBlock && (
                                 <DueLabel label={entry.dueLabel} cat={item?.dueCategory ?? "none"} />
                               )}
@@ -902,6 +1031,28 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                     className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                                   />
                                 </div>
+                                {item.isFixed && (
+                                  <div className="flex flex-col gap-2 sm:flex-row">
+                                    <div className="flex-1">
+                                      <label className="block text-xs font-medium text-muted-foreground">Starts at</label>
+                                      <input
+                                        type="time"
+                                        value={editForm.fixedStart}
+                                        onChange={(e) => setEditForm({ ...editForm, fixedStart: e.target.value })}
+                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                      />
+                                    </div>
+                                    <div className="flex-1">
+                                      <label className="block text-xs font-medium text-muted-foreground">Ends at</label>
+                                      <input
+                                        type="time"
+                                        value={editForm.fixedEnd}
+                                        onChange={(e) => setEditForm({ ...editForm, fixedEnd: e.target.value })}
+                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
                                 <div className="flex flex-col sm:flex-row gap-2">
                                   <div className="flex-1">
                                     <label className="block text-xs font-medium text-muted-foreground">Due date</label>
@@ -912,7 +1063,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                       className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                                     />
                                   </div>
-                                  <div className="flex-1">
+                                  {!item.isFixed && <div className="flex-1">
                                     <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
                                     <input
                                       type="number"
@@ -922,7 +1073,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                       onChange={(e) => setEditForm({ ...editForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
                                       className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                                     />
-                                  </div>
+                                  </div>}
                                 </div>
                                 <div className="flex flex-wrap gap-2 pt-1">
                                   {isFlexible && (
@@ -1109,45 +1260,32 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
 
 
-              {[
-                { title: "Needs attention", entries: attention, needsAttention: true },
-                { title: "Tomorrow", entries: tomorrow, needsAttention: false },
-              ].map((section) => section.entries.length > 0 && (
-                <div key={section.title} className="mt-10">
+              {tomorrow.length > 0 && (
+                <div className="mt-10">
                   <div className="flex items-center gap-3 border-b border-border/60 pb-4">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary text-primary">
-                      {section.needsAttention ? <AlertCircle className="h-5 w-5" strokeWidth={1.5} /> : <Calendar className="h-5 w-5" strokeWidth={1.5} />}
+                      <Calendar className="h-5 w-5" strokeWidth={1.5} />
                     </div>
-                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">{section.title}</h2>
+                    <h2 className="font-serif text-3xl font-normal leading-none text-foreground">Tomorrow</h2>
                   </div>
                   <ul className="mt-3 space-y-2.5">
-                    {section.entries.map((t) => {
+                    {tomorrow.map((t) => {
                       const item = items.find((i) => i.originalIndex === t.itemIndex);
                       const isEditing = editingIdx === t.itemIndex;
                       return (
-                        <li key={`${section.needsAttention ? "attention" : "tm"}-${t.itemIndex}`} className="rounded-xl border border-border bg-card p-3 sm:p-4">
+                        <li id={`tomorrow-item-${t.itemIndex}`} key={`tm-${t.itemIndex}`} className="rounded-xl border border-border bg-card p-3 sm:p-4">
                           <div className="flex items-start gap-3 sm:gap-4">
                             <div className="rounded-lg bg-secondary text-secondary-foreground w-11 h-11 flex items-center justify-center shrink-0">
-                              {section.needsAttention ? <AlertCircle className="h-5 w-5" /> : <Calendar className="h-5 w-5" />}
+                              <Calendar className="h-5 w-5" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span className="text-xs font-medium text-muted-foreground">{section.needsAttention ? "Couldn’t fit today" : "Tomorrow"}</span>
+                                <span className="text-xs font-medium text-muted-foreground">{item?.dueCategory === "today" ? "Couldn’t fit today" : "Tomorrow"}</span>
                                 <PriorityPill p={t.priority} />
                                 {t.dueLabel && item && <DueLabel label={t.dueLabel} cat={item.dueCategory} />}
                               </div>
                               <div className="mt-1 text-sm font-medium text-foreground">{t.title}</div>
-                              {section.needsAttention ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {item?.dueCategory === "today"
-                                    ? `This is due today, but there isn’t enough time left before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`
-                                    : item?.requiredToday
-                                      ? `This needs to be finished today, but there isn’t enough time left before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`
-                                      : `This couldn’t fully fit today before ${cutoffLabel}. It still needs ${formatDuration(t.remainingMinutes)}.`}
-                                </div>
-                              ) : (
-                                <div className="mt-0.5 text-xs text-muted-foreground">{formatDuration(t.remainingMinutes)} remaining</div>
-                              )}
+                              <div className="mt-0.5 text-xs text-muted-foreground">{formatDuration(t.remainingMinutes)} remaining</div>
                               {isEditing && editForm && item && (
                                 <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 space-y-2">
                                   <div>
@@ -1207,15 +1345,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               >
                                 Move to today
                               </button>
-                              {section.needsAttention && (
-                                <button
-                                  type="button"
-                                  onClick={() => moveToTomorrow(t.itemIndex)}
-                                  className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-accent"
-                                >
-                                  Leave for tomorrow
-                                </button>
-                              )}
                               <button
                                 type="button"
                                 onClick={() => startEdit(t.itemIndex)}
@@ -1230,7 +1359,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     })}
                   </ul>
                 </div>
-              ))}
+              )}
 
             </div>
           )}
@@ -1243,6 +1372,124 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             : "We'll build a plan that feels doable and kind to you."}
         </p>
       </div>
+
+      {showConflictModal && conflicts.length > 0 && items && !crowded && !showGuestCard && !confirmNewPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="conflict-modal-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <h3 id="conflict-modal-title" className="font-serif text-2xl text-foreground">
+                {overlapConflicts.length > 0 ? "Two commitments overlap" : "A few things need your attention"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowConflictModal(false)}
+                aria-label="Close conflict summary"
+                className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
+              {conflicts.map((conflict, index) => {
+                if (conflict.type === "fixed_overlap") {
+                  const first = items.find((item) => item.originalIndex === conflict.firstItemIndex);
+                  const second = items.find((item) => item.originalIndex === conflict.secondItemIndex);
+                  return (
+                    <li key={`overlap-${conflict.firstItemIndex}-${conflict.secondItemIndex}`}>
+                      <span className="font-medium text-foreground">{first?.title ?? "One commitment"}</span> and{" "}
+                      <span className="font-medium text-foreground">{second?.title ?? "another commitment"}</span> both take place from {minutesToTimeLabel(conflict.overlapStartMinutes)}–{minutesToTimeLabel(conflict.overlapEndMinutes)}. DailyNest can&apos;t decide which one you will attend.
+                    </li>
+                  );
+                }
+                if (conflict.type === "fixed_displacement") {
+                  const fixedDescriptions = conflict.fixedItemIndexes.map((itemIndex) => {
+                    const item = items.find((candidate) => candidate.originalIndex === itemIndex);
+                    return item
+                      ? `${item.title} is fixed from ${minutesToTimeLabel(hhmmToMinutes(item.fixedStart ?? "00:00"))}–${minutesToTimeLabel(hhmmToMinutes(item.fixedEnd ?? "00:00"))}`
+                      : null;
+                  }).filter(Boolean);
+                  const affectedNames = conflict.affectedItemIndexes.map(
+                    (itemIndex) => items.find((item) => item.originalIndex === itemIndex)?.title,
+                  ).filter(Boolean);
+                  return (
+                    <li key={`fixed-displacement-${index}`}>
+                      {fixedDescriptions.join("; ")}, so {affectedNames.join(" and ") || "important work"} could not all fit before {cutoffLabel}.
+                    </li>
+                  );
+                }
+                if (conflict.type === "due_today_unfit") {
+                  const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
+                  return (
+                    <li key={`due-${conflict.itemIndex}`}>
+                      <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> is due today{conflict.dueDate ? ` (${conflict.dueDate})` : ""} and still needs {formatDuration(conflict.remainingMinutes)}. Its due date has not changed, and it has not been marked complete.
+                    </li>
+                  );
+                }
+                if (conflict.type === "required_capacity") {
+                  return (
+                    <li key="required-capacity">
+                      {formatDuration(conflict.requiredMinutes)} is due or required today, but only {formatDuration(conflict.scheduledMinutes)} fits before {cutoffLabel}. {formatDuration(conflict.missingMinutes)} still needs time.
+                    </li>
+                  );
+                }
+                const item = items.find((candidate) => candidate.originalIndex === conflict.itemIndex);
+                return (
+                  <li key={`overflow-${conflict.itemIndex}`}>
+                    <span className="font-medium text-foreground">{item?.title ?? "A task"}</span> could not fully fit today and still needs {formatDuration(conflict.remainingMinutes)}.
+                  </li>
+                );
+              })}
+            </ul>
+
+            {overlapConflicts.length > 0 ? (
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => editConflictItem(overlapConflicts[0].firstItemIndex)}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Edit {items.find((item) => item.originalIndex === overlapConflicts[0].firstItemIndex)?.title ?? "first commitment"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => editConflictItem(overlapConflicts[0].secondItemIndex)}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+                >
+                  Edit {items.find((item) => item.originalIndex === overlapConflicts[0].secondItemIndex)?.title ?? "second commitment"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConflictModal(false)}
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Keep both for now
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConflictModal(false);
+                    if (firstAffectedItemIndex !== null) scrollToItem(firstAffectedItemIndex);
+                  }}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Review my plan
+                </button>
+                <button
+                  type="button"
+                  onClick={focusStopTime}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+                >
+                  Adjust end time
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {crowded && items && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
@@ -1303,7 +1550,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
               >
                 Do part today
-                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the rest will be marked Needs attention.</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the remaining time stays in the conflict summary.</div>
               </button>
 
               {historyRef.current && (
