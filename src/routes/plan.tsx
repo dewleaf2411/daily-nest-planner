@@ -754,13 +754,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             </div>
 
             {items && !loading && (
-              <button
-                type="button"
-                onClick={() => setConfirmNewPlan(true)}
-                className="mt-3 inline-flex items-center self-end rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              >
-                New Plan
-              </button>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setConfirmNewPlan(true)}
+                  className="inline-flex items-center rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                >
+                  New Plan
+                </button>
+              </div>
             )}
 
             {error && (
