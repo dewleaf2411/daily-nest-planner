@@ -339,6 +339,7 @@ function CommitmentsSection({
   flash: (m: string) => void;
 }) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ commitment: Commitment; day: number } | null>(null);
   const [form, setForm] = useState<Omit<Commitment, "id">>({
     name: "",
     days_of_week: [],
@@ -402,10 +403,21 @@ function CommitmentsSection({
     await supabase.from("fixed_commitments").update({ enabled: next }).eq("id", c.id);
   };
 
-  const remove = async (id: string) => {
+  const removeAll = async (id: string) => {
     setCommitments((prev) => prev.filter((c) => c.id !== id));
     await supabase.from("fixed_commitments").delete().eq("id", id);
     flash("Removed.");
+  };
+
+  const removeDay = async (c: Commitment, day: number) => {
+    const nextDays = c.days_of_week.filter((d) => d !== day);
+    if (nextDays.length === 0) {
+      await removeAll(c.id);
+      return;
+    }
+    setCommitments((prev) => prev.map((x) => (x.id === c.id ? { ...x, days_of_week: nextDays } : x)));
+    await supabase.from("fixed_commitments").update({ days_of_week: nextDays }).eq("id", c.id);
+    flash(`Removed for ${DAY_LONG[day]}.`);
   };
 
   const toggleDay = (d: number) => {
@@ -464,7 +476,13 @@ function CommitmentsSection({
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => remove(c.id)}
+                        onClick={() => {
+                          if (c.days_of_week.length > 1) {
+                            setDeleteTarget({ commitment: c, day: d });
+                          } else {
+                            removeAll(c.id);
+                          }
+                        }}
                         className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         aria-label="Delete"
                       >
@@ -555,6 +573,59 @@ function CommitmentsSection({
         >
           <Plus className="h-4 w-4" /> Add commitment
         </button>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-foreground/30 backdrop-blur-sm p-4"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground">
+                  Delete “{deleteTarget.commitment.name}”?
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  This commitment repeats on {deleteTarget.commitment.days_of_week.map((d) => DAY_LONG[d]).join(", ")}.
+                  Choose what you'd like to remove.
+                </p>
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    onClick={async () => {
+                      const t = deleteTarget;
+                      setDeleteTarget(null);
+                      await removeDay(t.commitment, t.day);
+                    }}
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-secondary/60 text-left"
+                  >
+                    Only remove from <span className="font-medium">{DAY_LONG[deleteTarget.day]}</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const t = deleteTarget;
+                      setDeleteTarget(null);
+                      await removeAll(t.commitment.id);
+                    }}
+                    className="rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 text-left"
+                  >
+                    Delete all events involving “{deleteTarget.commitment.name}”
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    className="mt-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </Section>
   );
