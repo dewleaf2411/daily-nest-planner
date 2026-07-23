@@ -36,6 +36,7 @@ export interface BuildOptions {
 
 export interface BuildResult {
   schedule: ScheduleEntry[];
+  attention: TomorrowEntry[];
   tomorrow: TomorrowEntry[];
   scheduledMinutes: number;
   requiredTodayConflict: {
@@ -48,6 +49,7 @@ export interface BuildResult {
 export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: BuildOptions): BuildResult {
   const byIdx = new Map(items.map((i) => [i.originalIndex, i]));
   const schedule: ScheduleEntry[] = [];
+  const attention: TomorrowEntry[] = [];
   const tomorrow: TomorrowEntry[] = [];
 
   // fixed commitments
@@ -97,7 +99,8 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   // Also anything suggested tomorrow explicitly goes to tomorrow
   for (const it of items) {
     if (!it.isFixed && it.suggestedDay === "tomorrow") {
-      tomorrow.push({
+      const destination = (it.requiredToday || it.dueCategory === "today") && !it.deferredByUser ? attention : tomorrow;
+      destination.push({
         itemIndex: it.originalIndex,
         title: it.title,
         remainingMinutes: it.durationMinutes,
@@ -131,6 +134,12 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
         return { placed: 0, overflow: remaining };
       }
       const desired = item.focusBlockMinutes && !item.isFixed ? Math.min(item.focusBlockMinutes, remaining) : remaining;
+      // Keep a requested focus block whole when a fixed commitment is the only
+      // thing making the current gap too short. Resume after the commitment.
+      if (nextFixed && available < desired) {
+        cursor = roundUpTo5(nextFixed.end);
+        continue;
+      }
       const take = Math.min(desired, available);
       if (take <= 0) return { placed: 0, overflow: remaining };
       const start = cursor;
@@ -156,11 +165,12 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     return { placed: 0, overflow: remaining };
   };
 
-  let requiredTodayMinutes = 0;
+  const requiredTodayMinutes = items
+    .filter((item) => !item.isFixed && !item.deferredByUser && (item.requiredToday || item.dueCategory === "today"))
+    .reduce((total, item) => total + item.durationMinutes, 0);
   let scheduledRequiredTodayMinutes = 0;
 
   for (const item of flexibleQueue) {
-    if (item.requiredToday) requiredTodayMinutes += item.durationMinutes;
     let remaining = item.durationMinutes;
     const blocksTotal = item.focusBlockMinutes ? Math.ceil(item.durationMinutes / item.focusBlockMinutes) : 1;
     let blockNum = 0;
@@ -173,7 +183,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       const { placed, overflow } = placeBlock(item, remaining, blockNum, blocksTotal, originalTotal);
       if (placed === 0) break;
       placedAny = true;
-      if (item.requiredToday) scheduledRequiredTodayMinutes += placed;
+      if (item.requiredToday || item.dueCategory === "today") scheduledRequiredTodayMinutes += placed;
       remaining = overflow;
       // break between focus blocks
       if (remaining > 0 && item.focusBlockMinutes) {
@@ -198,7 +208,8 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     }
 
     if (remaining > 0) {
-      tomorrow.push({
+      const destination = placedAny || item.requiredToday || item.dueCategory === "today" ? attention : tomorrow;
+      destination.push({
         itemIndex: item.originalIndex,
         title: item.title,
         remainingMinutes: remaining,
@@ -232,10 +243,11 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     }
   }
 
-  const scheduledMinutes = filled.filter((s) => s.kind !== "break").reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
+  const scheduledMinutes = filled.reduce((a, s) => a + (s.endMinutes - s.startMinutes), 0);
   const missingMinutes = requiredTodayMinutes - scheduledRequiredTodayMinutes;
   return {
     schedule: filled,
+    attention,
     tomorrow,
     scheduledMinutes,
     requiredTodayConflict:
