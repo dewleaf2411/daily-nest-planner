@@ -156,6 +156,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
   const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
+  const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
+  const toggleComplete = useCallback((idx: number) => {
+    setCompletedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }, []);
 
   const plan = useServerFn(planTasks);
 
