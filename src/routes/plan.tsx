@@ -918,18 +918,29 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               )}
 
               {conflicts.length > 0 && (
-                <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
+                  <div className="min-w-0 flex-1">
+                    {overlapConflicts.length > 0 && (
+                      <span>{overlapConflicts.length} unresolved fixed-time overlap{overlapConflicts.length === 1 ? "" : "s"}. </span>
+                    )}
+                    {dueTodayRemaining > 0 && (
+                      <span>{formatDuration(dueTodayRemaining)} of due-today work still needs time.</span>
+                    )}
+                    {overlapConflicts.length === 0 && dueTodayRemaining === 0 && capacityConflict && (
+                      <span>{formatDuration(capacityConflict.missingMinutes)} of required work still needs time.</span>
+                    )}
+                    {overlapConflicts.length === 0 && dueTodayRemaining === 0 && !capacityConflict && overflowRemaining > 0 && (
+                      <span>{formatDuration(overflowRemaining)} of planned work still needs time.</span>
+                    )}
+                  </div>
                   {overlapConflicts.length > 0 && (
-                    <span>{overlapConflicts.length} unresolved fixed-time overlap{overlapConflicts.length === 1 ? "" : "s"}. </span>
-                  )}
-                  {dueTodayRemaining > 0 && (
-                    <span>{formatDuration(dueTodayRemaining)} of due-today work still needs time.</span>
-                  )}
-                  {overlapConflicts.length === 0 && dueTodayRemaining === 0 && capacityConflict && (
-                    <span>{formatDuration(capacityConflict.missingMinutes)} of required work still needs time.</span>
-                  )}
-                  {overlapConflicts.length === 0 && dueTodayRemaining === 0 && !capacityConflict && overflowRemaining > 0 && (
-                    <span>{formatDuration(overflowRemaining)} of planned work still needs time.</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowConflictModal(true)}
+                      className="shrink-0 rounded-full border border-border/60 bg-background/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-background"
+                    >
+                      Review conflict
+                    </button>
                   )}
                 </div>
               )}
