@@ -753,6 +753,16 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               </button>
             </div>
 
+            {items && !loading && (
+              <button
+                type="button"
+                onClick={() => setConfirmNewPlan(true)}
+                className="mt-3 inline-flex items-center self-end rounded-md border border-border bg-background/70 px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              >
+                New Plan
+              </button>
+            )}
+
             {error && (
               <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg bg-soft-error px-3 py-2.5 text-sm text-soft-error-fg">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
