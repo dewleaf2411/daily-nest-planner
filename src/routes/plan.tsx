@@ -1633,14 +1633,16 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <div className="text-xs text-muted-foreground mt-0.5">Adds up to 3 more hours today.</div>
               </button>
 
-              <button
-                type="button"
-                onClick={crowdedDoPart}
-                className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
-              >
-                Do part today
-                <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the remaining time stays in the conflict summary.</div>
-              </button>
+              {crowded.availableMin >= 5 && (
+                <button
+                  type="button"
+                  onClick={crowdedDoPart}
+                  className="w-full text-left rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground hover:bg-accent"
+                >
+                  Do part today
+                  <div className="text-xs text-muted-foreground mt-0.5">Fit what you can; the remaining time stays in the conflict summary.</div>
+                </button>
+              )}
 
               {historyRef.current && (
                 <button
