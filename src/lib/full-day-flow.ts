@@ -95,7 +95,10 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
     }
     const plannedMinutes = itemMinutes(baseline.schedule, item.originalIndex);
     item.todayDurationMinutes = plannedMinutes;
-    item.remainingDurationMinutes = Math.max(0, item.durationMinutes - plannedMinutes);
+    item.remainingDurationMinutes = Math.max(
+      item.remainingDurationMinutes ?? 0,
+      item.durationMinutes - plannedMinutes,
+    );
   }
   let draftOrder = context.order.filter((index) => index !== context.newTaskIndex);
   let newTaskTodayIndex = context.newTaskIndex;
@@ -149,8 +152,10 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
       return null;
     }
     target.removedFromPlan = false;
+    const removedMinutes = currentTodayMinutes - adjustment.keepMinutes;
+    const existingRemainingMinutes = target.remainingDurationMinutes ?? 0;
     target.todayDurationMinutes = adjustment.keepMinutes;
-    target.remainingDurationMinutes = Math.max(0, target.durationMinutes - adjustment.keepMinutes);
+    target.remainingDurationMinutes = existingRemainingMinutes + removedMinutes;
     const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
     task.suggestedDay = "today";
     task.deferredByUser = false;

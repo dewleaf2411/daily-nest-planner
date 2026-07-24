@@ -1234,12 +1234,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               )}
                             </div>
                             <div className={`mt-1 text-sm font-medium text-foreground truncate ${item && completedTasks.has(item.originalIndex) ? "line-through decoration-1" : ""}`}>{entry.title}</div>
-                            {entry.isFirstBlock && entry.totalDuration && (
+                            {entry.kind !== "break" && (
                               <div className="mt-0.5 text-xs text-muted-foreground">
-                                Total: {formatDuration(entry.totalDuration)} ·{" "}
-                                {entry.focusBlockMinutes
-                                  ? `Focus: ${entry.focusBlockMinutes} min`
-                                  : "One work block"}
+                                {formatDuration(entry.endMinutes - entry.startMinutes)}
+                                {(item?.remainingDurationMinutes ?? 0) > 0 ? " today" : ""}
                               </div>
                             )}
                             {item && isEditing && editForm && (

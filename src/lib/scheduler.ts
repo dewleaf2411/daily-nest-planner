@@ -78,6 +78,22 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   const byIdx = new Map(items.map((item) => [item.originalIndex, item]));
   const schedule: ScheduleEntry[] = [];
   const tomorrow: TomorrowEntry[] = [];
+  const addTomorrow = (item: PlanItem, minutes: number, reason?: string) => {
+    if (minutes <= 0) return;
+    const existing = tomorrow.find((entry) => entry.itemIndex === item.originalIndex);
+    if (existing) {
+      existing.remainingMinutes += minutes;
+      return;
+    }
+    tomorrow.push({
+      itemIndex: item.originalIndex,
+      title: item.title,
+      remainingMinutes: minutes,
+      priority: item.priority,
+      dueLabel: item.dueLabel ?? null,
+      reason,
+    });
+  };
 
   const fixed = items
     .filter(
@@ -144,30 +160,19 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   for (const item of items) {
     if (!item.removedFromPlan && !item.isFixed && item.suggestedDay === "tomorrow") {
-      tomorrow.push({
-        itemIndex: item.originalIndex,
-        title: item.title,
-        remainingMinutes: item.remainingDurationMinutes ?? item.durationMinutes,
-        priority: item.priority,
-        dueLabel: item.dueLabel ?? null,
-        reason: item.dueCategory === "today" ? "Couldn't fit today" : item.note ?? undefined,
-      });
+      addTomorrow(
+        item,
+        item.remainingDurationMinutes ?? item.durationMinutes,
+        item.dueCategory === "today" ? "Couldn't fit today" : item.note ?? undefined,
+      );
     }
     if (
       !item.removedFromPlan &&
       !item.isFixed &&
       item.suggestedDay === "today" &&
-      item.todayDurationMinutes === 0 &&
-      (item.remainingDurationMinutes ?? item.durationMinutes) > 0
+      (item.remainingDurationMinutes ?? 0) > 0
     ) {
-      tomorrow.push({
-        itemIndex: item.originalIndex,
-        title: item.title,
-        remainingMinutes: item.remainingDurationMinutes ?? item.durationMinutes,
-        priority: item.priority,
-        dueLabel: item.dueLabel ?? null,
-        reason: "Couldn't fit today",
-      });
+      addTomorrow(item, item.remainingDurationMinutes ?? 0, "Remaining work");
     }
   }
 
@@ -271,14 +276,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     }
 
     if (remaining > 0 && !placedAny) {
-      tomorrow.push({
-        itemIndex: item.originalIndex,
-        title: item.title,
-        remainingMinutes: remaining,
-        priority: item.priority,
-        dueLabel: item.dueLabel ?? null,
-        reason: "Couldn't fit today",
-      });
+      addTomorrow(item, remaining, "Couldn't fit today");
     }
   }
 

@@ -5,6 +5,7 @@ import {
   previewRoomAdjustments,
 } from "./full-day-flow";
 import type { PlanItem } from "./planner.types";
+import { buildSchedule } from "./scheduler";
 
 function task(
   overrides: Partial<PlanItem> & Pick<PlanItem, "originalIndex" | "title" | "durationMinutes">,
@@ -123,7 +124,9 @@ describe("full day make-room flow", () => {
       30,
     );
     expect(preview?.result.schedule).toHaveLength(1);
-    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
+    expect(preview?.result.tomorrow).toContainEqual(
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 30 }),
+    );
   });
 
   it("moving a 90-minute task creates enough room", () => {
@@ -362,10 +365,12 @@ describe("full day make-room flow", () => {
     expect(
       preview?.items.filter((item) => item.title.includes("Chemistry worksheet")),
     ).toHaveLength(1);
-    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
+    expect(preview?.result.tomorrow).toContainEqual(
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 15 }),
+    );
   });
 
-  it("shortens a 60-minute block to 40 instead of moving the whole task", () => {
+  it("shortens a 60-minute block to 40 and carries 20 minutes to tomorrow", () => {
     const items = [
       task({
         originalIndex: 0,
@@ -388,6 +393,103 @@ describe("full day make-room flow", () => {
       targetIndex: 0,
       keepMinutes: 40,
     });
+    const preview = previewRoomAdjustment(
+      {
+        items,
+        order: [0],
+        newTaskIndex: 1,
+        nowMinutes: 18 * 60,
+        cutoffMinutes: 19 * 60,
+      },
+      { kind: "shorten", targetIndex: 0, keepMinutes: 40 },
+    );
+    expect(preview?.result.schedule).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          itemIndex: 0,
+          startMinutes: 18 * 60,
+          endMinutes: 18 * 60 + 40,
+        }),
+      ]),
+    );
+    expect(preview?.result.tomorrow).toContainEqual(
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 20 }),
+    );
+  });
+
+  it("shortens a 45-minute block to 30 and persists the 15-minute continuation", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Finish Chemistry resonance worksheet",
+        durationMinutes: 45,
+        dueDate: "2026-07-25",
+        dueCategory: "tomorrow",
+        dueLabel: "Due tomorrow",
+      }),
+      task({ originalIndex: 1, title: "test 7", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const context = {
+      items,
+      order: [0],
+      newTaskIndex: 1,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 18 * 60 + 45,
+    };
+    const preview = previewRoomAdjustment(context, {
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 30,
+    });
+    const chemistry = preview?.items.find((item) => item.originalIndex === 0);
+
+    expect(chemistry?.todayDurationMinutes).toBe(30);
+    expect(chemistry?.remainingDurationMinutes).toBe(15);
+    expect(chemistry?.dueDate).toBe("2026-07-25");
+    expect(preview?.result.tomorrow).toContainEqual(
+      expect.objectContaining({
+        itemIndex: 0,
+        title: "Finish Chemistry resonance worksheet",
+        remainingMinutes: 15,
+        dueLabel: "Due tomorrow",
+      }),
+    );
+
+    const rebuilt = preview
+      ? buildSchedule({
+          items: preview.items,
+          order: preview.order,
+          nowMinutes: context.nowMinutes,
+          cutoffMinutes: context.cutoffMinutes,
+        })
+      : null;
+    expect(rebuilt?.tomorrow).toContainEqual(
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 15 }),
+    );
+  });
+
+  it("adds removed minutes to work that was already remaining", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Chemistry worksheet",
+        durationMinutes: 65,
+        todayDurationMinutes: 45,
+        remainingDurationMinutes: 20,
+      }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      { kind: "shorten", targetIndex: 0, keepMinutes: 30 },
+    );
+    const chemistry = preview?.items.find((item) => item.originalIndex === 0);
+
+    expect(chemistry?.todayDurationMinutes).toBe(30);
+    expect(chemistry?.remainingDurationMinutes).toBe(35);
+    expect(preview?.result.tomorrow).toContainEqual(
+      expect.objectContaining({ itemIndex: 0, remainingMinutes: 35 }),
+    );
   });
 
   it("combines a safe 10-minute and 5-minute shortening without moving a whole task", () => {
