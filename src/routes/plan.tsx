@@ -1732,10 +1732,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
-                        Choose a task
+                        Make room
                       </h3>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        Fixed commitments stay where they are. Your due dates will not change.
+                        Pick a task to move, shorten, or remove.
                       </p>
                     </div>
                     <button
@@ -1747,7 +1747,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-5 max-h-52 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-4 max-h-40 space-y-2 overflow-y-auto pr-1">
                     {manualTasks.map((task) => (
                       <button
                         key={task.originalIndex}
@@ -1791,16 +1791,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     ))}
                   </div>
                   {selectedManualTask && (
-                    <div className="mt-5 space-y-3 border-t border-border pt-5">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Adjust {selectedManualTask.title}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Currently planned for {formatDuration(selectedManualMinutes)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-border bg-background p-3">
+                    <div className="mt-4 space-y-2 border-t border-border pt-4">
+                      <p className="text-sm font-medium text-foreground">
+                        {selectedManualTask.title} · {formatDuration(selectedManualMinutes)}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -1809,27 +1804,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               "choose",
                             )
                           }
-                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                          className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
                         >
-                          Move the entire task to tomorrow
+                          Move all to tomorrow
                         </button>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          This would free {formatDuration(selectedManualMinutes)}, which is{" "}
-                          {selectedManualMinutes > exactMinutesNeeded
-                            ? `more than the ${formatDuration(exactMinutesNeeded)} currently needed`
-                            : `the amount currently needed`}
-                          .
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              { kind: "remove", targetIndex: selectedManualTask.originalIndex },
+                              "choose",
+                            )
+                          }
+                          className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                        >
+                          Remove from today
+                        </button>
                       </div>
                       <div className="rounded-xl border border-border bg-background p-3">
-                        <p className="text-sm font-medium text-foreground">
-                          Shorten {selectedManualTask.title}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Currently: {formatDuration(selectedManualMinutes)}
-                        </p>
-                        <label className="mt-3 flex items-center justify-between gap-3 text-sm text-foreground">
-                          <span>Work on it for</span>
+                        <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                          <span className="text-xs">Keep only</span>
                           <span className="flex items-center gap-2">
                             <input
                               type="number"
@@ -1851,15 +1845,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                     : current,
                                 );
                               }}
-                              className="w-16 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
+                              className="w-14 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
                             />
-                            minutes today
+                            <span className="text-xs text-muted-foreground">min today</span>
                           </span>
                         </label>
-                        <p className="mt-2 text-xs text-muted-foreground">
+                        <p className="mt-1.5 text-xs text-muted-foreground">
                           {manualKeepIsValid
-                            ? `This frees ${formatDuration(manualMinutesFreed)}.`
-                            : `Enter a whole number from 1 to ${Math.max(1, selectedManualMinutes - 1)}.`}
+                            ? `Frees ${formatDuration(manualMinutesFreed)}.`
+                            : `Enter 1–${Math.max(1, selectedManualMinutes - 1)} min.`}
                         </p>
                         <button
                           type="button"
@@ -1874,27 +1868,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               "choose",
                             )
                           }
-                          className="mt-3 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                          className="mt-2 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          Preview shortening
+                          Preview
                         </button>
-                      </div>
-                      <div className="rounded-xl px-1 py-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            selectRoomAdjustment(
-                              { kind: "remove", targetIndex: selectedManualTask.originalIndex },
-                              "choose",
-                            )
-                          }
-                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
-                        >
-                          Take this task out of today’s plan
-                        </button>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          The task will stay saved, but it will no longer have a time block today.
-                        </p>
                       </div>
                     </div>
                   )}
