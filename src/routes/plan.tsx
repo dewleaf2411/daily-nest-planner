@@ -1643,7 +1643,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
                     “{newTask.title}” was placed tomorrow because there isn’t enough realistic time left today.
                   </p>
-                  <div className="mt-8 space-y-3">
+                  <div className="mt-6 space-y-2">
                     <button
                       type="button"
                       onClick={closeFullDayFlow}
@@ -1693,23 +1693,23 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-6 space-y-3">
+                  <div className="mt-4 space-y-2">
                     {roomSuggestions.map((suggestion) => (
                       <button
                         key={suggestion.id}
                         type="button"
                         onClick={() => selectRoomAdjustment(suggestion.adjustment, "suggestions")}
-                        className="w-full rounded-2xl border border-border bg-background p-4 text-left hover:bg-accent/60"
+                        className="w-full rounded-2xl border border-border bg-background p-3 text-left hover:bg-accent/60"
                       >
                         <span className="block text-sm font-medium text-foreground">{suggestion.title}</span>
-                        <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">
+                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
                           {suggestion.detail}
                         </span>
                       </button>
                     ))}
                     {roomSuggestions.length === 0 && (
-                      <p className="rounded-2xl bg-secondary/50 p-4 text-sm leading-relaxed text-muted-foreground">
-                        There isn’t an obvious task to move, but you can choose one yourself.
+                      <p className="rounded-2xl bg-secondary/50 p-3 text-sm leading-relaxed text-muted-foreground">
+                        No obvious task to move. Choose one yourself.
                       </p>
                     )}
                   </div>
@@ -1720,7 +1720,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         current ? { ...current, stage: "choose", message: null } : current,
                       )
                     }
-                    className="mt-5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                    className="mt-4 text-sm font-medium text-primary underline-offset-4 hover:underline"
                   >
                     Choose myself
                   </button>
