@@ -1556,7 +1556,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
         return (
           <div
-            className="fixed inset-0 z-[60] flex items-end justify-center bg-foreground/15 px-0 sm:px-4 sm:pb-4"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-foreground/15 px-0 sm:px-4 sm:pb-4"
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) closeFullDayFlow();
             }}
