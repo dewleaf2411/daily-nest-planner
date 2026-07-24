@@ -779,6 +779,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     pushHistory();
     setItems(roomPreview.items);
     setUserOrder(roomPreview.order);
+    if (roomPreview.cutoffMinutes !== cutoffMinutes) {
+      const hours = Math.floor(roomPreview.cutoffMinutes / 60);
+      const minutes = roomPreview.cutoffMinutes % 60;
+      setAvailableUntil(`${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`);
+    }
     setFullDayFlow(null);
     flashStatus("Your plan was updated.");
   };
@@ -1877,6 +1882,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       {roomPreview.adjustment.kind === "remove" &&
                         `Take ${roomPreview.affectedTaskTitle} out of today’s plan`}
                       {roomPreview.adjustment.kind === "start" && roomPreview.summary}
+                      {roomPreview.adjustment.kind === "extend" &&
+                        `Extend today by ${formatDuration(roomPreview.adjustment.minutes)}`}
                     </p>
                     {roomPreview.adjustment.kind !== "start" && (
                       <p className="mt-2 text-sm text-muted-foreground">
@@ -1888,6 +1895,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         ? `This creates enough room for “${newTask.title}”.`
                         : `“${newTask.title}” needs ${formatDuration(roomPreview.newTaskNeededMinutes)}, so you still need to create ${formatDuration(roomPreview.missingMinutes)} more.`}
                     </p>
+                    {roomPreview.enoughRoom && roomPreview.minutesLeftOver > 0 && (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {formatDuration(roomPreview.minutesLeftOver)} will remain open.
+                      </p>
+                    )}
                   </div>
                   {roomPreview.enoughRoom && (
                     <div className="mt-5 rounded-2xl border border-border bg-background p-4">
@@ -1966,7 +1978,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       }
                       className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground hover:bg-accent"
                     >
-                      Go back
+                      {roomPreview.enoughRoom ? "Choose a different adjustment" : "Go back"}
                     </button>
                   </div>
                 </>

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildRoomSuggestions, previewRoomAdjustment } from "./full-day-flow";
+import {
+  buildRoomSuggestions,
+  previewRoomAdjustment,
+  previewRoomAdjustments,
+} from "./full-day-flow";
 import type { PlanItem } from "./planner.types";
 
 function task(
@@ -157,5 +161,138 @@ describe("full day make-room flow", () => {
     expect(preview?.enoughRoom).toBe(false);
     expect(preview?.items.find((item) => item.originalIndex === 0)?.removedFromPlan).toBe(true);
     expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
+  });
+
+  it("leaves 45 minutes over when a 60-minute removal makes room for 15 minutes", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Long task", durationMinutes: 60 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      { kind: "remove", targetIndex: 0 },
+    );
+
+    expect(preview?.minutesFreed).toBe(60);
+    expect(preview?.newTaskNeededMinutes).toBe(15);
+    expect(preview?.missingMinutes).toBe(0);
+    expect(preview?.minutesLeftOver).toBe(45);
+    expect(preview?.enoughRoom).toBe(true);
+  });
+
+  it("shortens 60 minutes to 45 to create exactly 15 minutes", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry worksheet", durationMinutes: 60 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      { kind: "shorten", targetIndex: 0, keepMinutes: 45 },
+    );
+
+    expect(preview?.minutesFreed).toBe(15);
+    expect(preview?.missingMinutes).toBe(0);
+    expect(preview?.minutesLeftOver).toBe(0);
+    expect(preview?.enoughRoom).toBe(true);
+  });
+
+  it("recommends the exact 15-minute shortening before a whole-task move", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Chemistry worksheet",
+        durationMinutes: 60,
+        priority: "low",
+      }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const suggestions = buildRoomSuggestions({
+      items,
+      order: [0],
+      newTaskIndex: 1,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 19 * 60,
+    });
+
+    expect(suggestions[0]?.adjustment).toEqual({
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 45,
+    });
+    expect(suggestions.some((suggestion) => suggestion.adjustment.kind === "move")).toBe(false);
+  });
+
+  it("offers a reasonable stop-time extension before a whole-task move", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Class",
+        durationMinutes: 60,
+        isFixed: true,
+        fixedStart: "18:00",
+        fixedEnd: "19:00",
+      }),
+      task({
+        originalIndex: 1,
+        title: "New task",
+        durationMinutes: 15,
+        suggestedDay: "tomorrow",
+        dueDate: "2026-07-30",
+        dueCategory: "future",
+      }),
+    ];
+    const suggestions = buildRoomSuggestions({
+      items,
+      order: [],
+      newTaskIndex: 1,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 19 * 60,
+    });
+    const preview = previewRoomAdjustment(
+      { items, order: [], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      { kind: "extend", minutes: 15 },
+    );
+
+    expect(suggestions[0]?.adjustment).toEqual({ kind: "extend", minutes: 15 });
+    expect(preview?.cutoffMinutes).toBe(19 * 60 + 15);
+    expect(preview?.items.find((item) => item.originalIndex === 1)?.dueDate).toBe("2026-07-30");
+  });
+
+  it("still needs 10 minutes when a change frees 20 for a 30-minute task", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Short task", durationMinutes: 20 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 30, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 18 * 60 + 20 },
+      { kind: "remove", targetIndex: 0 },
+    );
+
+    expect(preview?.minutesFreed).toBe(20);
+    expect(preview?.newTaskNeededMinutes).toBe(30);
+    expect(preview?.missingMinutes).toBe(10);
+    expect(preview?.enoughRoom).toBe(false);
+  });
+
+  it("adds multiple freed-minute adjustments without counting a duplicate twice", () => {
+    const items = [
+      task({ originalIndex: 0, title: "First task", durationMinutes: 10 }),
+      task({ originalIndex: 1, title: "Second task", durationMinutes: 15 }),
+      task({ originalIndex: 2, title: "New task", durationMinutes: 25, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustments(
+      { items, order: [0, 1], newTaskIndex: 2, nowMinutes: 18 * 60, cutoffMinutes: 18 * 60 + 25 },
+      [
+        { kind: "remove", targetIndex: 0 },
+        { kind: "remove", targetIndex: 1 },
+        { kind: "remove", targetIndex: 0 },
+      ],
+    );
+
+    expect(preview?.adjustments).toHaveLength(2);
+    expect(preview?.minutesFreed).toBe(25);
+    expect(preview?.missingMinutes).toBe(0);
+    expect(preview?.minutesLeftOver).toBe(0);
+    expect(preview?.enoughRoom).toBe(true);
   });
 });
