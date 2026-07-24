@@ -1632,8 +1632,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               role="dialog"
               aria-modal="true"
               aria-labelledby="full-day-sheet-title"
-              className="w-full max-w-xl rounded-t-3xl border border-border bg-card px-6 pb-7 pt-6 shadow-xl sm:rounded-3xl sm:px-8 sm:pb-8"
+              className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-border bg-card px-6 pb-7 pt-6 shadow-xl sm:rounded-3xl sm:px-8 sm:pb-8"
             >
+              <div className="-mx-6 flex-1 overflow-y-auto px-6 sm:-mx-8 sm:px-8">
               {fullDayFlow.stage === "notice" && (
                 <>
                   <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
@@ -1642,7 +1643,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
                     “{newTask.title}” was placed tomorrow because there isn’t enough realistic time left today.
                   </p>
-                  <div className="mt-8 space-y-3">
+                  <div className="mt-6 space-y-2">
                     <button
                       type="button"
                       onClick={closeFullDayFlow}
@@ -1692,23 +1693,23 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-6 space-y-3">
+                  <div className="mt-4 space-y-2">
                     {roomSuggestions.map((suggestion) => (
                       <button
                         key={suggestion.id}
                         type="button"
                         onClick={() => selectRoomAdjustment(suggestion.adjustment, "suggestions")}
-                        className="w-full rounded-2xl border border-border bg-background p-4 text-left hover:bg-accent/60"
+                        className="w-full rounded-2xl border border-border bg-background p-3 text-left hover:bg-accent/60"
                       >
                         <span className="block text-sm font-medium text-foreground">{suggestion.title}</span>
-                        <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">
+                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
                           {suggestion.detail}
                         </span>
                       </button>
                     ))}
                     {roomSuggestions.length === 0 && (
-                      <p className="rounded-2xl bg-secondary/50 p-4 text-sm leading-relaxed text-muted-foreground">
-                        There isn’t an obvious task to move, but you can choose one yourself.
+                      <p className="rounded-2xl bg-secondary/50 p-3 text-sm leading-relaxed text-muted-foreground">
+                        No obvious task to move. Choose one yourself.
                       </p>
                     )}
                   </div>
@@ -1719,7 +1720,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         current ? { ...current, stage: "choose", message: null } : current,
                       )
                     }
-                    className="mt-5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                    className="mt-4 text-sm font-medium text-primary underline-offset-4 hover:underline"
                   >
                     Choose myself
                   </button>
@@ -1731,10 +1732,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
-                        Choose a task
+                        Make room
                       </h3>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        Fixed commitments stay where they are. Your due dates will not change.
+                        Pick a task to move, shorten, or remove.
                       </p>
                     </div>
                     <button
@@ -1746,7 +1747,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-5 max-h-52 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-4 max-h-40 space-y-2 overflow-y-auto pr-1">
                     {manualTasks.map((task) => (
                       <button
                         key={task.originalIndex}
@@ -1790,16 +1791,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     ))}
                   </div>
                   {selectedManualTask && (
-                    <div className="mt-5 space-y-3 border-t border-border pt-5">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Adjust {selectedManualTask.title}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Currently planned for {formatDuration(selectedManualMinutes)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-border bg-background p-3">
+                    <div className="mt-4 space-y-2 border-t border-border pt-4">
+                      <p className="text-sm font-medium text-foreground">
+                        {selectedManualTask.title} · {formatDuration(selectedManualMinutes)}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -1808,27 +1804,26 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               "choose",
                             )
                           }
-                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                          className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
                         >
-                          Move the entire task to tomorrow
+                          Move all to tomorrow
                         </button>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          This would free {formatDuration(selectedManualMinutes)}, which is{" "}
-                          {selectedManualMinutes > exactMinutesNeeded
-                            ? `more than the ${formatDuration(exactMinutesNeeded)} currently needed`
-                            : `the amount currently needed`}
-                          .
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              { kind: "remove", targetIndex: selectedManualTask.originalIndex },
+                              "choose",
+                            )
+                          }
+                          className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+                        >
+                          Remove from today
+                        </button>
                       </div>
                       <div className="rounded-xl border border-border bg-background p-3">
-                        <p className="text-sm font-medium text-foreground">
-                          Shorten {selectedManualTask.title}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Currently: {formatDuration(selectedManualMinutes)}
-                        </p>
-                        <label className="mt-3 flex items-center justify-between gap-3 text-sm text-foreground">
-                          <span>Work on it for</span>
+                        <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                          <span className="text-xs">Keep only</span>
                           <span className="flex items-center gap-2">
                             <input
                               type="number"
@@ -1850,15 +1845,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                     : current,
                                 );
                               }}
-                              className="w-16 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
+                              className="w-14 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
                             />
-                            minutes today
+                            <span className="text-xs text-muted-foreground">min today</span>
                           </span>
                         </label>
-                        <p className="mt-2 text-xs text-muted-foreground">
+                        <p className="mt-1.5 text-xs text-muted-foreground">
                           {manualKeepIsValid
-                            ? `This frees ${formatDuration(manualMinutesFreed)}.`
-                            : `Enter a whole number from 1 to ${Math.max(1, selectedManualMinutes - 1)}.`}
+                            ? `Frees ${formatDuration(manualMinutesFreed)}.`
+                            : `Enter 1–${Math.max(1, selectedManualMinutes - 1)} min.`}
                         </p>
                         <button
                           type="button"
@@ -1873,27 +1868,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               "choose",
                             )
                           }
-                          className="mt-3 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                          className="mt-2 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          Preview shortening
+                          Preview
                         </button>
-                      </div>
-                      <div className="rounded-xl px-1 py-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            selectRoomAdjustment(
-                              { kind: "remove", targetIndex: selectedManualTask.originalIndex },
-                              "choose",
-                            )
-                          }
-                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
-                        >
-                          Take this task out of today’s plan
-                        </button>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                          The task will stay saved, but it will no longer have a time block today.
-                        </p>
                       </div>
                     </div>
                   )}
@@ -1922,56 +1900,33 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {fullDayFlow.stage === "preview" && roomPreview && (
                 <>
                   <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
-                    Here’s what will change
+                    Preview
                   </h3>
                   <div className="mt-4 rounded-2xl border border-border bg-background p-4">
                     <p className="text-sm font-medium text-foreground">
-                      Make {formatDuration(roomPreview.minutesFreed || roomPreview.newTaskScheduledMinutes)} of room
+                      {roomPreview.enoughRoom
+                        ? `Room made for “${newTask.title}”`
+                        : `Need ${formatDuration(roomPreview.missingMinutes)} more room`}
                     </p>
-                    <ul className="mt-3 space-y-3">
+                    <ul className="mt-3 space-y-2">
                       {roomPreview.impacts.map((impact, index) => (
-                        <li key={`${impact.kind}-${impact.taskIndex ?? "time"}-${index}`}>
-                          <p className="text-sm text-foreground">
-                            {impact.kind === "shorten" &&
-                              `Shorten ${impact.title} by ${formatDuration(impact.minutesFreed)}.`}
-                            {impact.kind === "move" && `Move the entire ${impact.title} to tomorrow.`}
-                            {impact.kind === "remove" && `Take ${impact.title} out of today’s plan.`}
-                            {impact.kind === "extend" &&
-                              `Use ${formatDuration(impact.minutesFreed)} more today.`}
-                            {impact.kind === "start" &&
-                              `Give ${impact.title} a ${formatDuration(impact.afterMinutes)} block today.`}
-                          </p>
-                          {impact.taskIndex !== null && impact.kind !== "start" && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {formatDuration(impact.beforeMinutes)} → {formatDuration(impact.afterMinutes)}
-                            </p>
-                          )}
+                        <li key={`${impact.kind}-${impact.taskIndex ?? "time"}-${index}`} className="text-sm text-foreground">
+                          {impact.kind === "shorten" &&
+                            `${impact.title}: ${formatDuration(impact.beforeMinutes)} → ${formatDuration(impact.afterMinutes)}`}
+                          {impact.kind === "move" && `Move ${impact.title} to tomorrow`}
+                          {impact.kind === "remove" && `Remove ${impact.title} from today`}
+                          {impact.kind === "extend" && `Extend today by ${formatDuration(impact.minutesFreed)}`}
+                          {impact.kind === "start" && `Add ${impact.title} today`}
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                      {roomPreview.enoughRoom
-                        ? `This creates enough room for “${newTask.title}”.`
-                        : `“${newTask.title}” needs ${formatDuration(roomPreview.newTaskNeededMinutes)}, so you still need to create ${formatDuration(roomPreview.missingMinutes)} more.`}
-                    </p>
-                    {roomPreview.enoughRoom && roomPreview.minutesLeftOver > 0 && (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {formatDuration(roomPreview.minutesLeftOver)} will remain open.
-                      </p>
-                    )}
-                  </div>
-                  {roomPreview.enoughRoom && (
-                    <div className="mt-5 rounded-2xl border border-border bg-background p-4">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        “{newTask.title}” will fit here
-                      </p>
-                      <p className="mt-2 text-sm text-foreground">
-                        Added today for {formatDuration(roomPreview.newTaskScheduledMinutes)}
-                      </p>
-                      <ul className="mt-3 space-y-2">
-                        {roomPreview.result.schedule
-                          .filter((entry) => entry.itemIndex === roomPreview.newTaskTodayIndex)
-                          .map((entry) => (
+                    {roomPreview.enoughRoom && (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          New time blocks
+                        </p>
+                        <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                          {roomPreview.result.schedule.map((entry) => (
                             <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
                               <span className="truncate text-foreground">{entry.title}</span>
                               <span className="shrink-0 text-xs text-muted-foreground">
@@ -1979,23 +1934,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               </span>
                             </li>
                           ))}
-                      </ul>
-                      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Updated time blocks
-                      </p>
-                      <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto">
-                        {roomPreview.result.schedule.map((entry) => (
-                          <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
-                            <span className="truncate text-foreground">{entry.title}</span>
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  <div className="mt-6 space-y-3">
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-5 space-y-2">
                     {roomPreview.enoughRoom ? (
                       <button
                         type="button"
@@ -2010,18 +1953,13 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         onClick={() =>
                           setFullDayFlow((current) =>
                             current
-                              ? {
-                                  ...current,
-                                  stage: "choose",
-                                  adjustment: null,
-                                  message: null,
-                                }
+                              ? { ...current, stage: "choose", adjustment: null, message: null }
                               : current,
                           )
                         }
                         className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                       >
-                        Choose another adjustment
+                        Adjust more
                       </button>
                     )}
                     <button
@@ -2029,22 +1967,18 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       onClick={() =>
                         setFullDayFlow((current) =>
                           current
-                            ? {
-                                ...current,
-                                stage: current.previewFrom,
-                                adjustment: null,
-                                message: null,
-                              }
+                            ? { ...current, stage: current.previewFrom, adjustment: null, message: null }
                             : current,
                         )
                       }
                       className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground hover:bg-accent"
                     >
-                      {roomPreview.enoughRoom ? "Choose a different adjustment" : "Go back"}
+                      Back
                     </button>
                   </div>
                 </>
               )}
+              </div>
             </div>
           </div>
         );
