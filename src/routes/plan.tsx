@@ -1632,8 +1632,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               role="dialog"
               aria-modal="true"
               aria-labelledby="full-day-sheet-title"
-              className="w-full max-w-xl rounded-t-3xl border border-border bg-card px-6 pb-7 pt-6 shadow-xl sm:rounded-3xl sm:px-8 sm:pb-8"
+              className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-border bg-card px-6 pb-7 pt-6 shadow-xl sm:rounded-3xl sm:px-8 sm:pb-8"
             >
+              <div className="-mx-6 flex-1 overflow-y-auto px-6 sm:-mx-8 sm:px-8">
               {fullDayFlow.stage === "notice" && (
                 <>
                   <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
