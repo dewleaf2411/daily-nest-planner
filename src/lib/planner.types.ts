@@ -21,6 +21,8 @@ export interface PlanItem {
   note?: string | null;
   /** The user explicitly chose to leave a same-day item for tomorrow. */
   deferredByUser?: boolean;
+  /** The task is still saved, but the user removed it from the visible Today/Tomorrow plan. */
+  removedFromPlan?: boolean;
 }
 
 export type ScheduleEntryKind = "task" | "break" | "fixed";

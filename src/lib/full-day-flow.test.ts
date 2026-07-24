@@ -107,4 +107,55 @@ describe("full day make-room flow", () => {
     expect(preview?.result.schedule).toHaveLength(1);
     expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(true);
   });
+
+  it("moving a 90-minute task creates enough room", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry worksheet", durationMinutes: 90 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 60, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 20 * 60 },
+      { kind: "move", targetIndex: 0 },
+    );
+
+    expect(preview?.minutesFreed).toBe(90);
+    expect(preview?.missingMinutes).toBe(0);
+    expect(preview?.enoughRoom).toBe(true);
+    expect(preview?.items.find((item) => item.originalIndex === 0)?.suggestedDay).toBe("tomorrow");
+  });
+
+  it("shortening a 90-minute task to 40 minutes frees exactly 50 minutes", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry worksheet", durationMinutes: 90 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 50, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 20 * 60 },
+      { kind: "shorten", targetIndex: 0, keepMinutes: 40 },
+    );
+
+    expect(preview?.affectedCurrentMinutes).toBe(90);
+    expect(preview?.affectedAfterMinutes).toBe(40);
+    expect(preview?.minutesFreed).toBe(50);
+    expect(preview?.enoughRoom).toBe(true);
+  });
+
+  it("previews an insufficient removal and keeps the task out of Tomorrow", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Short task", durationMinutes: 20 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 35, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 20 * 60, cutoffMinutes: 20 * 60 + 20 },
+      { kind: "remove", targetIndex: 0 },
+    );
+
+    expect(preview).not.toBeNull();
+    expect(preview?.minutesFreed).toBe(20);
+    expect(preview?.newTaskNeededMinutes).toBe(35);
+    expect(preview?.missingMinutes).toBe(15);
+    expect(preview?.enoughRoom).toBe(false);
+    expect(preview?.items.find((item) => item.originalIndex === 0)?.removedFromPlan).toBe(true);
+    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
+  });
 });

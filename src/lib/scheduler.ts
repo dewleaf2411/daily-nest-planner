@@ -76,7 +76,10 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   const tomorrow: TomorrowEntry[] = [];
 
   const fixed = items
-    .filter((item) => item.isFixed && item.fixedStart && item.suggestedDay === "today")
+    .filter(
+      (item) =>
+        !item.removedFromPlan && item.isFixed && item.fixedStart && item.suggestedDay === "today",
+    )
     .map((item) => {
       const start = hhmmToMinutes(item.fixedStart!);
       const requestedEnd = item.fixedEnd ? hhmmToMinutes(item.fixedEnd) : start + item.durationMinutes;
@@ -105,12 +108,25 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   const queued = new Set<number>();
   for (const idx of order) {
     const item = byIdx.get(idx);
-    if (!item || item.isFixed || item.suggestedDay !== "today" || queued.has(idx)) continue;
+    if (
+      !item ||
+      item.removedFromPlan ||
+      item.isFixed ||
+      item.suggestedDay !== "today" ||
+      queued.has(idx)
+    ) {
+      continue;
+    }
     flexibleQueue.push(item);
     queued.add(idx);
   }
   for (const item of items) {
-    if (!item.isFixed && item.suggestedDay === "today" && !queued.has(item.originalIndex)) {
+    if (
+      !item.removedFromPlan &&
+      !item.isFixed &&
+      item.suggestedDay === "today" &&
+      !queued.has(item.originalIndex)
+    ) {
       flexibleQueue.push(item);
     }
   }
@@ -121,7 +137,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   );
 
   for (const item of items) {
-    if (!item.isFixed && item.suggestedDay === "tomorrow") {
+    if (!item.removedFromPlan && !item.isFixed && item.suggestedDay === "tomorrow") {
       tomorrow.push({
         itemIndex: item.originalIndex,
         title: item.title,
@@ -277,7 +293,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   const remainingByItem = new Map<number, number>();
   for (const item of items) {
-    if (item.isFixed) continue;
+    if (item.isFixed || item.removedFromPlan) continue;
     const scheduledForToday = scheduledTaskMinutes.get(item.originalIndex) ?? 0;
     const remaining = Math.max(0, item.durationMinutes - scheduledForToday);
     if (remaining > 0) remainingByItem.set(item.originalIndex, remaining);
@@ -301,7 +317,10 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   }
 
   const importantItems = items.filter(
-    (item) => !item.isFixed && (item.requiredToday || item.dueCategory === "today"),
+    (item) =>
+      !item.removedFromPlan &&
+      !item.isFixed &&
+      (item.requiredToday || item.dueCategory === "today"),
   );
   const affectedImportantItems = importantItems.filter(
     (item) => (remainingByItem.get(item.originalIndex) ?? 0) > 0,
@@ -378,7 +397,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
   const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const flexToday = items
-    .filter((item) => !item.isFixed && item.suggestedDay === "today")
+    .filter((item) => !item.removedFromPlan && !item.isFixed && item.suggestedDay === "today")
     .map((item) => item.originalIndex);
   const importantToday = flexToday.filter((index) => {
     const item = items.find((candidate) => candidate.originalIndex === index);

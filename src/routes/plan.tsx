@@ -751,10 +751,18 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const selectRoomAdjustment = (adjustment: RoomAdjustment, from: "suggestions" | "choose") => {
-    if (!roomContext || !previewRoomAdjustment(roomContext, adjustment)) {
+    if (!roomContext) return;
+    const preview = previewRoomAdjustment(roomContext, adjustment);
+    if (!preview) {
       setFullDayFlow((current) =>
         current
-          ? { ...current, message: "That adjustment doesn’t create enough room before your stop time." }
+          ? {
+              ...current,
+              message:
+                adjustment.kind === "shorten"
+                  ? "Enter a whole number of minutes greater than zero and lower than the task’s current planned time."
+                  : "That task can’t be adjusted. Choose another flexible task.",
+            }
           : current,
       );
       return;
@@ -767,7 +775,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const applyRoomPreview = () => {
-    if (!roomPreview) return;
+    if (!roomPreview?.enoughRoom) return;
     pushHistory();
     setItems(roomPreview.items);
     setUserOrder(roomPreview.order);
@@ -1553,6 +1561,18 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         const selectedManualTask = manualTasks.find(
           (item) => item.originalIndex === fullDayFlow.manualTargetIndex,
         );
+        const selectedManualMinutes = selectedManualTask
+          ? schedule
+              .filter((entry) => entry.itemIndex === selectedManualTask.originalIndex)
+              .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0)
+          : 0;
+        const manualKeepIsValid =
+          Number.isInteger(fullDayFlow.manualKeepMinutes) &&
+          fullDayFlow.manualKeepMinutes > 0 &&
+          fullDayFlow.manualKeepMinutes < selectedManualMinutes;
+        const manualMinutesFreed = manualKeepIsValid
+          ? selectedManualMinutes - fullDayFlow.manualKeepMinutes
+          : 0;
 
         return (
           <div
@@ -1684,18 +1704,24 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <button
                         key={task.originalIndex}
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          const plannedMinutes = schedule
+                            .filter((entry) => entry.itemIndex === task.originalIndex)
+                            .reduce(
+                              (total, entry) => total + entry.endMinutes - entry.startMinutes,
+                              0,
+                            );
                           setFullDayFlow((current) =>
                             current
                               ? {
                                   ...current,
                                   manualTargetIndex: task.originalIndex,
-                                  manualKeepMinutes: Math.min(20, Math.max(5, task.durationMinutes - 5)),
+                                  manualKeepMinutes: Math.min(20, Math.max(1, plannedMinutes - 1)),
                                   message: null,
                                 }
                               : current,
-                          )
-                        }
+                          );
+                        }}
                         className={`flex w-full items-center justify-between rounded-xl border p-3 text-left ${
                           selectedManualTask?.originalIndex === task.originalIndex
                             ? "border-primary bg-secondary/60"
@@ -1703,12 +1729,29 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         }`}
                       >
                         <span className="text-sm font-medium text-foreground">{task.title}</span>
-                        <span className="text-xs text-muted-foreground">{formatDuration(task.durationMinutes)}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDuration(
+                            schedule
+                              .filter((entry) => entry.itemIndex === task.originalIndex)
+                              .reduce(
+                                (total, entry) => total + entry.endMinutes - entry.startMinutes,
+                                0,
+                              ),
+                          )}
+                        </span>
                       </button>
                     ))}
                   </div>
                   {selectedManualTask && (
                     <div className="mt-5 space-y-3 border-t border-border pt-5">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          Adjust {selectedManualTask.title}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Currently planned for {formatDuration(selectedManualMinutes)}
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={() =>
@@ -1722,33 +1765,48 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         Move to tomorrow
                       </button>
                       <div className="rounded-xl border border-border bg-background p-3">
-                        <label className="flex items-center justify-between gap-3 text-sm text-foreground">
-                          <span>Shorten today’s work block to</span>
+                        <p className="text-sm font-medium text-foreground">
+                          Shorten {selectedManualTask.title}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Currently: {formatDuration(selectedManualMinutes)}
+                        </p>
+                        <label className="mt-3 flex items-center justify-between gap-3 text-sm text-foreground">
+                          <span>Work on it for</span>
                           <span className="flex items-center gap-2">
                             <input
                               type="number"
-                              min={5}
-                              max={Math.max(5, selectedManualTask.durationMinutes - 5)}
-                              step={5}
+                              min={1}
+                              max={Math.max(1, selectedManualMinutes - 1)}
+                              step={1}
                               value={fullDayFlow.manualKeepMinutes}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const nextValue = Number(event.target.value);
                                 setFullDayFlow((current) =>
                                   current
                                     ? {
                                         ...current,
-                                        manualKeepMinutes: Math.max(5, Number(event.target.value) || 5),
+                                        manualKeepMinutes: Number.isFinite(nextValue)
+                                          ? Math.trunc(nextValue)
+                                          : 0,
                                         message: null,
                                       }
                                     : current,
-                                )
-                              }
+                                );
+                              }}
                               className="w-16 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
                             />
-                            min
+                            minutes today
                           </span>
                         </label>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {manualKeepIsValid
+                            ? `This frees ${formatDuration(manualMinutesFreed)}.`
+                            : `Enter a whole number from 1 to ${Math.max(1, selectedManualMinutes - 1)}.`}
+                        </p>
                         <button
                           type="button"
+                          disabled={!manualKeepIsValid}
                           onClick={() =>
                             selectRoomAdjustment(
                               {
@@ -1759,23 +1817,28 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               "choose",
                             )
                           }
-                          className="mt-3 text-xs font-medium text-primary underline-offset-4 hover:underline"
+                          className="mt-3 text-xs font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Preview shortening
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          selectRoomAdjustment(
-                            { kind: "remove", targetIndex: selectedManualTask.originalIndex },
-                            "choose",
-                          )
-                        }
-                        className="w-full rounded-xl px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        Remove from today’s plan without deleting
-                      </button>
+                      <div className="rounded-xl px-1 py-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              { kind: "remove", targetIndex: selectedManualTask.originalIndex },
+                              "choose",
+                            )
+                          }
+                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                        >
+                          Take this task out of today’s plan
+                        </button>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          The task will stay saved, but it will no longer have a time block today.
+                        </p>
+                      </div>
                     </div>
                   )}
                   {manualTasks.length === 0 && (
@@ -1805,28 +1868,88 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
                     Here’s what will change
                   </h3>
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{roomPreview.summary}</p>
-                  <div className="mt-5 rounded-2xl border border-border bg-background p-4">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Updated time blocks</p>
-                    <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-                      {roomPreview.result.schedule.map((entry) => (
-                        <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="truncate text-foreground">{entry.title}</span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="mt-4 rounded-2xl border border-border bg-background p-4">
+                    <p className="text-sm font-medium text-foreground">
+                      {roomPreview.adjustment.kind === "move" &&
+                        `Move ${roomPreview.affectedTaskTitle} to tomorrow`}
+                      {roomPreview.adjustment.kind === "shorten" &&
+                        `Shorten ${roomPreview.affectedTaskTitle} from ${formatDuration(roomPreview.affectedCurrentMinutes)} to ${formatDuration(roomPreview.affectedAfterMinutes)}`}
+                      {roomPreview.adjustment.kind === "remove" &&
+                        `Take ${roomPreview.affectedTaskTitle} out of today’s plan`}
+                      {roomPreview.adjustment.kind === "start" && roomPreview.summary}
+                    </p>
+                    {roomPreview.adjustment.kind !== "start" && (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        This frees {formatDuration(roomPreview.minutesFreed)} today.
+                      </p>
+                    )}
+                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                      {roomPreview.enoughRoom
+                        ? `This creates enough room for “${newTask.title}”.`
+                        : `“${newTask.title}” needs ${formatDuration(roomPreview.newTaskNeededMinutes)}, so you still need to create ${formatDuration(roomPreview.missingMinutes)} more.`}
+                    </p>
                   </div>
+                  {roomPreview.enoughRoom && (
+                    <div className="mt-5 rounded-2xl border border-border bg-background p-4">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        “{newTask.title}” will fit here
+                      </p>
+                      <ul className="mt-3 space-y-2">
+                        {roomPreview.result.schedule
+                          .filter((entry) => entry.itemIndex === roomPreview.newTaskTodayIndex)
+                          .map((entry) => (
+                            <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                              <span className="truncate text-foreground">{entry.title}</span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Updated time blocks
+                      </p>
+                      <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto">
+                        {roomPreview.result.schedule.map((entry) => (
+                          <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                            <span className="truncate text-foreground">{entry.title}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <div className="mt-6 space-y-3">
-                    <button
-                      type="button"
-                      onClick={applyRoomPreview}
-                      className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                    >
-                      Update my plan
-                    </button>
+                    {roomPreview.enoughRoom ? (
+                      <button
+                        type="button"
+                        onClick={applyRoomPreview}
+                        className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        Update my plan
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFullDayFlow((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  stage: "choose",
+                                  adjustment: null,
+                                  message: null,
+                                }
+                              : current,
+                          )
+                        }
+                        className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        Choose another adjustment
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() =>

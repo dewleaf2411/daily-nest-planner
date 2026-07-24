@@ -23,6 +23,14 @@ export interface RoomPreview {
   changedItemIndexes: number[];
   newTaskTodayIndex: number;
   summary: string;
+  affectedTaskTitle: string | null;
+  affectedCurrentMinutes: number;
+  affectedAfterMinutes: number;
+  minutesFreed: number;
+  newTaskNeededMinutes: number;
+  newTaskScheduledMinutes: number;
+  missingMinutes: number;
+  enoughRoom: boolean;
 }
 
 interface RoomContext {
@@ -55,7 +63,7 @@ function dueIsNotSooner(candidate: PlanItem, newTask: PlanItem) {
   return candidate.dueDate >= newTask.dueDate;
 }
 
-function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
+function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPreview | null {
   const newTask = context.items.find((item) => item.originalIndex === context.newTaskIndex);
   if (!newTask) return null;
 
@@ -68,14 +76,19 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
   if (adjustment.kind === "move" || adjustment.kind === "remove") {
     const target = draftItems.find((item) => item.originalIndex === adjustment.targetIndex);
     if (!target || target.isFixed) return null;
-    target.suggestedDay = "tomorrow";
-    target.deferredByUser = true;
-    if (adjustment.kind === "remove") {
+    if (adjustment.kind === "move") {
+      target.suggestedDay = "tomorrow";
+      target.deferredByUser = true;
+      target.removedFromPlan = false;
+    } else {
+      target.removedFromPlan = true;
+      target.deferredByUser = false;
       target.note = target.note || "Removed from today’s plan";
     }
     const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
     task.suggestedDay = "today";
     task.deferredByUser = false;
+    task.removedFromPlan = false;
     draftOrder = [
       ...draftOrder.filter((index) => index !== target.originalIndex),
       task.originalIndex,
@@ -98,6 +111,7 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
       return null;
     }
     const remainder = target.durationMinutes - adjustment.keepMinutes;
+    target.removedFromPlan = false;
     target.durationMinutes = adjustment.keepMinutes;
     const spilloverIndex = nextIndex(draftItems);
     draftItems.push({
@@ -112,6 +126,7 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
     const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
     task.suggestedDay = "today";
     task.deferredByUser = false;
+    task.removedFromPlan = false;
     draftOrder = [
       ...draftOrder.filter((index) => index !== target.originalIndex),
       target.originalIndex,
@@ -126,6 +141,7 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
       return null;
     }
     const tomorrowTask = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
+    tomorrowTask.removedFromPlan = false;
     tomorrowTask.durationMinutes -= adjustment.sessionMinutes;
     const todayIndex = nextIndex(draftItems);
     draftItems.push({
@@ -158,6 +174,14 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment) {
     changedItemIndexes,
     newTaskTodayIndex,
     summary,
+    affectedTaskTitle: null,
+    affectedCurrentMinutes: 0,
+    affectedAfterMinutes: 0,
+    minutesFreed: 0,
+    newTaskNeededMinutes: 0,
+    newTaskScheduledMinutes: 0,
+    missingMinutes: 0,
+    enoughRoom: false,
   } satisfies RoomPreview;
 }
 
@@ -177,20 +201,39 @@ export function previewRoomAdjustment(context: RoomContext, adjustment: RoomAdju
       : (context.items.find((item) => item.originalIndex === context.newTaskIndex)
           ?.durationMinutes ?? 0);
 
-  if (itemMinutes(preview.result.schedule, preview.newTaskTodayIndex) !== expectedNewMinutes) {
-    return null;
-  }
-
   const allowedChanges = new Set(preview.changedItemIndexes);
+  let unaffectedTasksChanged = false;
   for (const item of context.items) {
     if (allowedChanges.has(item.originalIndex)) continue;
     if (
       itemMinutes(baseline.schedule, item.originalIndex) !==
       itemMinutes(preview.result.schedule, item.originalIndex)
     ) {
-      return null;
+      unaffectedTasksChanged = true;
+      break;
     }
   }
+
+  const targetIndex = "targetIndex" in adjustment ? adjustment.targetIndex : null;
+  const target =
+    targetIndex === null
+      ? null
+      : (context.items.find((item) => item.originalIndex === targetIndex) ?? null);
+  const affectedCurrentMinutes =
+    targetIndex === null ? 0 : itemMinutes(baseline.schedule, targetIndex);
+  const affectedAfterMinutes =
+    targetIndex === null ? 0 : itemMinutes(preview.result.schedule, targetIndex);
+  const newTaskScheduledMinutes = itemMinutes(preview.result.schedule, preview.newTaskTodayIndex);
+  const missingMinutes = Math.max(0, expectedNewMinutes - newTaskScheduledMinutes);
+
+  preview.affectedTaskTitle = target?.title ?? null;
+  preview.affectedCurrentMinutes = affectedCurrentMinutes;
+  preview.affectedAfterMinutes = affectedAfterMinutes;
+  preview.minutesFreed = Math.max(0, affectedCurrentMinutes - affectedAfterMinutes);
+  preview.newTaskNeededMinutes = expectedNewMinutes;
+  preview.newTaskScheduledMinutes = newTaskScheduledMinutes;
+  preview.missingMinutes = missingMinutes;
+  preview.enoughRoom = missingMinutes === 0 && !unaffectedTasksChanged;
 
   return preview;
 }
@@ -226,7 +269,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
   for (const candidate of candidates) {
     const adjustment: RoomAdjustment = { kind: "move", targetIndex: candidate.originalIndex };
     const preview = previewRoomAdjustment(context, adjustment);
-    if (!preview) continue;
+    if (!preview?.enoughRoom) continue;
     const minutes = itemMinutes(baseline.schedule, candidate.originalIndex);
     suggestions.push({
       id: `move-${candidate.originalIndex}`,
@@ -252,7 +295,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
         keepMinutes,
       };
       const preview = previewRoomAdjustment(context, adjustment);
-      if (!preview) continue;
+      if (!preview?.enoughRoom) continue;
       const created = candidate.durationMinutes - keepMinutes;
       suggestions.push({
         id: `shorten-${candidate.originalIndex}-${keepMinutes}`,
@@ -270,7 +313,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
   for (const sessionMinutes of [15, 10, 5]) {
     if (sessionMinutes >= newTask.durationMinutes) continue;
     const adjustment: RoomAdjustment = { kind: "start", sessionMinutes };
-    if (!previewRoomAdjustment(context, adjustment)) continue;
+    if (!previewRoomAdjustment(context, adjustment)?.enoughRoom) continue;
     suggestions.push({
       id: `start-${sessionMinutes}`,
       title: "Use a shorter work session",
