@@ -23,6 +23,10 @@ export interface PlanItem {
   deferredByUser?: boolean;
   /** The task is still saved, but the user removed it from the visible Today/Tomorrow plan. */
   removedFromPlan?: boolean;
+  /** The work block intentionally planned for Today, separate from total remaining task work. */
+  todayDurationMinutes?: number;
+  /** Work still remaining after Today's planned block; the task and due date stay unchanged. */
+  remainingDurationMinutes?: number;
 }
 
 export type ScheduleEntryKind = "task" | "break" | "fixed";

@@ -14,6 +14,10 @@ function roundUpTo5(m: number): number {
   return Math.ceil(m / 5) * 5;
 }
 
+function todayDuration(item: PlanItem): number {
+  return Math.max(0, item.todayDurationMinutes ?? item.durationMinutes);
+}
+
 export function minutesToTimeLabel(mins: number): string {
   const total = ((mins % 1440) + 1440) % 1440;
   let h = Math.floor(total / 60);
@@ -113,6 +117,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       item.removedFromPlan ||
       item.isFixed ||
       item.suggestedDay !== "today" ||
+      todayDuration(item) <= 0 ||
       queued.has(idx)
     ) {
       continue;
@@ -125,6 +130,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       !item.removedFromPlan &&
       !item.isFixed &&
       item.suggestedDay === "today" &&
+      todayDuration(item) > 0 &&
       !queued.has(item.originalIndex)
     ) {
       flexibleQueue.push(item);
@@ -141,10 +147,26 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       tomorrow.push({
         itemIndex: item.originalIndex,
         title: item.title,
-        remainingMinutes: item.durationMinutes,
+        remainingMinutes: item.remainingDurationMinutes ?? item.durationMinutes,
         priority: item.priority,
         dueLabel: item.dueLabel ?? null,
         reason: item.dueCategory === "today" ? "Couldn't fit today" : item.note ?? undefined,
+      });
+    }
+    if (
+      !item.removedFromPlan &&
+      !item.isFixed &&
+      item.suggestedDay === "today" &&
+      item.todayDurationMinutes === 0 &&
+      (item.remainingDurationMinutes ?? item.durationMinutes) > 0
+    ) {
+      tomorrow.push({
+        itemIndex: item.originalIndex,
+        title: item.title,
+        remainingMinutes: item.remainingDurationMinutes ?? item.durationMinutes,
+        priority: item.priority,
+        dueLabel: item.dueLabel ?? null,
+        reason: "Couldn't fit today",
       });
     }
   }
@@ -205,9 +227,10 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   };
 
   for (const item of flexibleQueue) {
-    let remaining = item.durationMinutes;
+    const plannedMinutes = todayDuration(item);
+    let remaining = plannedMinutes;
     const blocksTotal = item.focusBlockMinutes
-      ? Math.ceil(item.durationMinutes / item.focusBlockMinutes)
+      ? Math.ceil(plannedMinutes / item.focusBlockMinutes)
       : 1;
     let blockNum = 0;
     let placedAny = false;
@@ -220,7 +243,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
         remaining,
         blockNum,
         blocksTotal,
-        item.durationMinutes,
+        plannedMinutes,
       );
       if (placed === 0) break;
       placedAny = true;
@@ -295,7 +318,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   for (const item of items) {
     if (item.isFixed || item.removedFromPlan) continue;
     const scheduledForToday = scheduledTaskMinutes.get(item.originalIndex) ?? 0;
-    const remaining = Math.max(0, item.durationMinutes - scheduledForToday);
+    const remaining = Math.max(0, todayDuration(item) - scheduledForToday);
     if (remaining > 0) remainingByItem.set(item.originalIndex, remaining);
   }
 
@@ -397,7 +420,13 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
   const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const flexToday = items
-    .filter((item) => !item.removedFromPlan && !item.isFixed && item.suggestedDay === "today")
+    .filter(
+      (item) =>
+        !item.removedFromPlan &&
+        !item.isFixed &&
+        item.suggestedDay === "today" &&
+        todayDuration(item) > 0,
+    )
     .map((item) => item.originalIndex);
   const importantToday = flexToday.filter((index) => {
     const item = items.find((candidate) => candidate.originalIndex === index);

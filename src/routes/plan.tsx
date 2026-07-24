@@ -7,7 +7,9 @@ import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import {
   buildRoomSuggestions,
+  getRoomMinutesNeeded,
   previewRoomAdjustment,
+  previewRoomAdjustments,
   type RoomAdjustment,
 } from "@/lib/full-day-flow";
 import { supabase } from "@/integrations/supabase/client";
@@ -144,7 +146,7 @@ interface CrowdedProposal {
 interface FullDayFlow {
   taskIndex: number;
   stage: "notice" | "suggestions" | "choose" | "preview";
-  adjustment: RoomAdjustment | null;
+  adjustment: RoomAdjustment | RoomAdjustment[] | null;
   previewFrom: "suggestions" | "choose";
   manualTargetIndex: number | null;
   manualKeepMinutes: number;
@@ -347,7 +349,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const roomPreview = useMemo(
     () =>
       roomContext && fullDayFlow?.adjustment
-        ? previewRoomAdjustment(roomContext, fullDayFlow.adjustment)
+        ? Array.isArray(fullDayFlow.adjustment)
+          ? previewRoomAdjustments(roomContext, fullDayFlow.adjustment)
+          : previewRoomAdjustment(roomContext, fullDayFlow.adjustment)
         : null,
     [fullDayFlow?.adjustment, roomContext],
   );
@@ -515,14 +519,24 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           it.isFixed && fixedStart && fixedEnd
             ? Math.max(5, hhmmToMinutes(fixedEnd) - hhmmToMinutes(fixedStart))
             : null;
+        const nextDuration =
+          fixedDuration ?? Math.max(5, Math.round(editForm.durationMinutes / 5) * 5);
+        const nextTodayDuration =
+          it.todayDurationMinutes === undefined
+            ? undefined
+            : Math.min(it.todayDurationMinutes, nextDuration);
         return {
           ...it,
           title: editForm.title.trim() || it.title,
           dueDate: editForm.dueDate || null,
           dueLabel: label,
           dueCategory: cat,
-          durationMinutes:
-            fixedDuration ?? Math.max(5, Math.round(editForm.durationMinutes / 5) * 5),
+          durationMinutes: nextDuration,
+          todayDurationMinutes: nextTodayDuration,
+          remainingDurationMinutes:
+            nextTodayDuration === undefined
+              ? undefined
+              : Math.max(0, nextDuration - nextTodayDuration),
           fixedStart,
           fixedEnd,
         };
@@ -547,7 +561,19 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   const moveToTomorrow = (idx: number) => {
     pushHistory();
-    updateItems((prev) => prev.map((it) => (it.originalIndex === idx ? { ...it, suggestedDay: "tomorrow" as const, deferredByUser: true } : it)));
+    updateItems((prev) =>
+      prev.map((it) =>
+        it.originalIndex === idx
+          ? {
+              ...it,
+              suggestedDay: "tomorrow" as const,
+              deferredByUser: true,
+              todayDurationMinutes: 0,
+              remainingDurationMinutes: it.durationMinutes,
+            }
+          : it,
+      ),
+    );
     setUserOrder((o) => o.filter((i) => i !== idx));
     setEditingIdx(null);
     flashStatus("Moved to Tomorrow.");
@@ -557,11 +583,21 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (!items) return;
     const it = items.find((i) => i.originalIndex === idx);
     if (!it) return;
+    const moveToday = (item: PlanItem) =>
+      item.originalIndex === idx
+        ? {
+            ...item,
+            suggestedDay: "today" as const,
+            deferredByUser: false,
+            todayDurationMinutes: item.durationMinutes,
+            remainingDurationMinutes: 0,
+          }
+        : item;
     // check how much free time there is
     const test = buildSchedule({
-      items: items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)),
+      items: items.map(moveToday),
       order: computeOrder(
-        items.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)),
+        items.map(moveToday),
         [...userOrder, idx],
       ),
       nowMinutes,
@@ -573,7 +609,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const needMin = it.durationMinutes;
     const availableMin = Math.max(0, cutoffMinutes - Math.max(nowMinutes, 0));
     pushHistory();
-    updateItems((prev) => prev.map((x) => (x.originalIndex === idx ? { ...x, suggestedDay: "today" as const, deferredByUser: false } : x)));
+    updateItems((prev) => prev.map(moveToday));
     setUserOrder((o) => [...o, idx]);
     if (scheduledForTask < it.durationMinutes) {
       flashStatus("Moved to Today — some of it may not fit before your available-until time.");
@@ -750,16 +786,21 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     undo();
   };
 
-  const selectRoomAdjustment = (adjustment: RoomAdjustment, from: "suggestions" | "choose") => {
+  const selectRoomAdjustment = (
+    adjustment: RoomAdjustment | RoomAdjustment[],
+    from: "suggestions" | "choose",
+  ) => {
     if (!roomContext) return;
-    const preview = previewRoomAdjustment(roomContext, adjustment);
+    const preview = Array.isArray(adjustment)
+      ? previewRoomAdjustments(roomContext, adjustment)
+      : previewRoomAdjustment(roomContext, adjustment);
     if (!preview) {
       setFullDayFlow((current) =>
         current
           ? {
               ...current,
               message:
-                adjustment.kind === "shorten"
+                !Array.isArray(adjustment) && adjustment.kind === "shorten"
                   ? "Enter a whole number of minutes greater than zero and lower than the task’s current planned time."
                   : "That task can’t be adjusted. Choose another flexible task.",
             }
@@ -1578,6 +1619,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         const manualMinutesFreed = manualKeepIsValid
           ? selectedManualMinutes - fullDayFlow.manualKeepMinutes
           : 0;
+        const exactMinutesNeeded = roomContext ? getRoomMinutesNeeded(roomContext) : newTask.durationMinutes;
 
         return (
           <div
@@ -1757,18 +1799,27 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           Currently planned for {formatDuration(selectedManualMinutes)}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          selectRoomAdjustment(
-                            { kind: "move", targetIndex: selectedManualTask.originalIndex },
-                            "choose",
-                          )
-                        }
-                        className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground hover:bg-accent"
-                      >
-                        Move to tomorrow
-                      </button>
+                      <div className="rounded-xl border border-border bg-background p-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              { kind: "move", targetIndex: selectedManualTask.originalIndex },
+                              "choose",
+                            )
+                          }
+                          className="text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                        >
+                          Move the entire task to tomorrow
+                        </button>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          This would free {formatDuration(selectedManualMinutes)}, which is{" "}
+                          {selectedManualMinutes > exactMinutesNeeded
+                            ? `more than the ${formatDuration(exactMinutesNeeded)} currently needed`
+                            : `the amount currently needed`}
+                          .
+                        </p>
+                      </div>
                       <div className="rounded-xl border border-border bg-background p-3">
                         <p className="text-sm font-medium text-foreground">
                           Shorten {selectedManualTask.title}
@@ -1875,21 +1926,29 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   </h3>
                   <div className="mt-4 rounded-2xl border border-border bg-background p-4">
                     <p className="text-sm font-medium text-foreground">
-                      {roomPreview.adjustment.kind === "move" &&
-                        `Move ${roomPreview.affectedTaskTitle} to tomorrow`}
-                      {roomPreview.adjustment.kind === "shorten" &&
-                        `Shorten ${roomPreview.affectedTaskTitle} from ${formatDuration(roomPreview.affectedCurrentMinutes)} to ${formatDuration(roomPreview.affectedAfterMinutes)}`}
-                      {roomPreview.adjustment.kind === "remove" &&
-                        `Take ${roomPreview.affectedTaskTitle} out of today’s plan`}
-                      {roomPreview.adjustment.kind === "start" && roomPreview.summary}
-                      {roomPreview.adjustment.kind === "extend" &&
-                        `Extend today by ${formatDuration(roomPreview.adjustment.minutes)}`}
+                      Make {formatDuration(roomPreview.minutesFreed || roomPreview.newTaskScheduledMinutes)} of room
                     </p>
-                    {roomPreview.adjustment.kind !== "start" && (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        This frees {formatDuration(roomPreview.minutesFreed)} today.
-                      </p>
-                    )}
+                    <ul className="mt-3 space-y-3">
+                      {roomPreview.impacts.map((impact, index) => (
+                        <li key={`${impact.kind}-${impact.taskIndex ?? "time"}-${index}`}>
+                          <p className="text-sm text-foreground">
+                            {impact.kind === "shorten" &&
+                              `Shorten ${impact.title} by ${formatDuration(impact.minutesFreed)}.`}
+                            {impact.kind === "move" && `Move the entire ${impact.title} to tomorrow.`}
+                            {impact.kind === "remove" && `Take ${impact.title} out of today’s plan.`}
+                            {impact.kind === "extend" &&
+                              `Use ${formatDuration(impact.minutesFreed)} more today.`}
+                            {impact.kind === "start" &&
+                              `Give ${impact.title} a ${formatDuration(impact.afterMinutes)} block today.`}
+                          </p>
+                          {impact.taskIndex !== null && impact.kind !== "start" && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDuration(impact.beforeMinutes)} → {formatDuration(impact.afterMinutes)}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
                     <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                       {roomPreview.enoughRoom
                         ? `This creates enough room for “${newTask.title}”.`
@@ -1905,6 +1964,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     <div className="mt-5 rounded-2xl border border-border bg-background p-4">
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         “{newTask.title}” will fit here
+                      </p>
+                      <p className="mt-2 text-sm text-foreground">
+                        Added today for {formatDuration(roomPreview.newTaskScheduledMinutes)}
                       </p>
                       <ul className="mt-3 space-y-2">
                         {roomPreview.result.schedule

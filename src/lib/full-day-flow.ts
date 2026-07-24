@@ -13,7 +13,16 @@ export interface RoomSuggestion {
   title: string;
   detail: string;
   minutesCreated: number;
-  adjustment: RoomAdjustment;
+  adjustment: RoomAdjustment | RoomAdjustment[];
+}
+
+export interface RoomImpact {
+  kind: RoomAdjustment["kind"];
+  taskIndex: number | null;
+  title: string;
+  beforeMinutes: number;
+  afterMinutes: number;
+  minutesFreed: number;
 }
 
 export interface RoomPreview {
@@ -26,6 +35,7 @@ export interface RoomPreview {
   newTaskTodayIndex: number;
   cutoffMinutes: number;
   summary: string;
+  impacts: RoomImpact[];
   affectedTaskTitle: string | null;
   affectedCurrentMinutes: number;
   affectedAfterMinutes: number;
@@ -37,7 +47,7 @@ export interface RoomPreview {
   enoughRoom: boolean;
 }
 
-interface RoomContext {
+export interface RoomContext {
   items: PlanItem[];
   order: number[];
   newTaskIndex: number;
@@ -57,13 +67,9 @@ function itemMinutes(schedule: ScheduleEntry[], itemIndex: number) {
     .reduce((total, entry) => total + (entry.endMinutes - entry.startMinutes), 0);
 }
 
-function nextIndex(items: PlanItem[]) {
-  return items.reduce((max, item) => Math.max(max, item.originalIndex), -1) + 1;
-}
-
 function dueIsNotSooner(candidate: PlanItem, newTask: PlanItem) {
   if (!candidate.dueDate) return true;
-  if (!newTask.dueDate) return false;
+  if (!newTask.dueDate) return true;
   return candidate.dueDate >= newTask.dueDate;
 }
 
@@ -71,7 +77,26 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
   const newTask = context.items.find((item) => item.originalIndex === context.newTaskIndex);
   if (!newTask) return null;
 
+  const baseline = buildSchedule({
+    items: context.items,
+    order: context.order,
+    nowMinutes: context.nowMinutes,
+    cutoffMinutes: context.cutoffMinutes,
+  });
   const draftItems = context.items.map((item) => ({ ...item }));
+  for (const item of draftItems) {
+    if (
+      item.originalIndex === context.newTaskIndex ||
+      item.isFixed ||
+      item.suggestedDay !== "today" ||
+      item.removedFromPlan
+    ) {
+      continue;
+    }
+    const plannedMinutes = itemMinutes(baseline.schedule, item.originalIndex);
+    item.todayDurationMinutes = plannedMinutes;
+    item.remainingDurationMinutes = Math.max(0, item.durationMinutes - plannedMinutes);
+  }
   let draftOrder = context.order.filter((index) => index !== context.newTaskIndex);
   let newTaskTodayIndex = context.newTaskIndex;
   const changedItemIndexes = [context.newTaskIndex];
@@ -85,20 +110,25 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
       target.suggestedDay = "tomorrow";
       target.deferredByUser = true;
       target.removedFromPlan = false;
+      target.todayDurationMinutes = 0;
+      target.remainingDurationMinutes = target.durationMinutes;
     } else {
       target.removedFromPlan = true;
       target.deferredByUser = false;
+      target.todayDurationMinutes = 0;
+      target.remainingDurationMinutes = target.durationMinutes;
       target.note = target.note || "Removed from today’s plan";
     }
     const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
     task.suggestedDay = "today";
     task.deferredByUser = false;
     task.removedFromPlan = false;
-    const targetPosition = Math.max(0, draftOrder.indexOf(target.originalIndex));
+    task.todayDurationMinutes = task.durationMinutes;
+    task.remainingDurationMinutes = 0;
     draftOrder = draftOrder.filter(
       (index) => index !== target.originalIndex && index !== task.originalIndex,
     );
-    draftOrder.splice(targetPosition, 0, task.originalIndex);
+    draftOrder.push(task.originalIndex);
     changedItemIndexes.push(target.originalIndex);
     summary =
       adjustment.kind === "move"
@@ -108,61 +138,47 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
 
   if (adjustment.kind === "shorten") {
     const target = draftItems.find((item) => item.originalIndex === adjustment.targetIndex);
+    const currentTodayMinutes = target?.todayDurationMinutes ?? target?.durationMinutes ?? 0;
     if (
       !target ||
       target.isFixed ||
-      adjustment.keepMinutes < 5 ||
-      adjustment.keepMinutes >= target.durationMinutes
+      adjustment.keepMinutes < 1 ||
+      adjustment.keepMinutes >= currentTodayMinutes
     ) {
       return null;
     }
-    const remainder = target.durationMinutes - adjustment.keepMinutes;
     target.removedFromPlan = false;
-    target.durationMinutes = adjustment.keepMinutes;
-    const spilloverIndex = nextIndex(draftItems);
-    draftItems.push({
-      ...target,
-      originalIndex: spilloverIndex,
-      title: `Continue ${target.title}`,
-      durationMinutes: remainder,
-      suggestedDay: "tomorrow",
-      deferredByUser: true,
-      note: target.note || `Continue ${target.title}`,
-    });
+    target.todayDurationMinutes = adjustment.keepMinutes;
+    target.remainingDurationMinutes = Math.max(0, target.durationMinutes - adjustment.keepMinutes);
     const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
     task.suggestedDay = "today";
     task.deferredByUser = false;
     task.removedFromPlan = false;
+    task.todayDurationMinutes = task.durationMinutes;
+    task.remainingDurationMinutes = 0;
     const targetPosition = Math.max(0, draftOrder.indexOf(target.originalIndex));
     draftOrder = draftOrder.filter(
       (index) => index !== target.originalIndex && index !== task.originalIndex,
     );
-    draftOrder.splice(targetPosition, 0, target.originalIndex, task.originalIndex);
-    changedItemIndexes.push(target.originalIndex, spilloverIndex);
-    summary = `Spend ${adjustment.keepMinutes} minutes on “${target.title}” today, continue it tomorrow, and make room for “${task.title}”.`;
+    draftOrder.splice(Math.min(targetPosition, draftOrder.length), 0, target.originalIndex);
+    draftOrder.push(task.originalIndex);
+    changedItemIndexes.push(target.originalIndex);
+    summary = `Shorten “${target.title}” by ${currentTodayMinutes - adjustment.keepMinutes} minutes and make room for “${task.title}”.`;
   }
 
   if (adjustment.kind === "start") {
     if (adjustment.sessionMinutes < 5 || adjustment.sessionMinutes >= newTask.durationMinutes) {
       return null;
     }
-    const tomorrowTask = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
-    tomorrowTask.removedFromPlan = false;
-    tomorrowTask.durationMinutes -= adjustment.sessionMinutes;
-    const todayIndex = nextIndex(draftItems);
-    draftItems.push({
-      ...tomorrowTask,
-      originalIndex: todayIndex,
-      title: `Start ${tomorrowTask.title}`,
-      durationMinutes: adjustment.sessionMinutes,
-      suggestedDay: "today",
-      deferredByUser: false,
-      note: tomorrowTask.note || `Start ${tomorrowTask.title}`,
-    });
-    newTaskTodayIndex = todayIndex;
-    changedItemIndexes.push(todayIndex);
-    draftOrder = [...draftOrder, todayIndex];
-    summary = `Start “${tomorrowTask.title}” for ${adjustment.sessionMinutes} minutes today and continue it tomorrow.`;
+    const task = draftItems.find((item) => item.originalIndex === context.newTaskIndex)!;
+    task.removedFromPlan = false;
+    task.suggestedDay = "today";
+    task.deferredByUser = false;
+    task.todayDurationMinutes = adjustment.sessionMinutes;
+    task.remainingDurationMinutes = task.durationMinutes - adjustment.sessionMinutes;
+    newTaskTodayIndex = task.originalIndex;
+    draftOrder = [...draftOrder, task.originalIndex];
+    summary = `Start “${task.title}” for ${adjustment.sessionMinutes} minutes today and leave ${task.remainingDurationMinutes} minutes for later.`;
   }
 
   if (adjustment.kind === "extend") {
@@ -177,6 +193,8 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
     task.suggestedDay = "today";
     task.deferredByUser = false;
     task.removedFromPlan = false;
+    task.todayDurationMinutes = task.durationMinutes;
+    task.remainingDurationMinutes = 0;
     draftOrder = [
       ...draftOrder.filter((index) => index !== task.originalIndex),
       task.originalIndex,
@@ -202,6 +220,7 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
     newTaskTodayIndex,
     cutoffMinutes: previewCutoffMinutes,
     summary,
+    impacts: [],
     affectedTaskTitle: null,
     affectedCurrentMinutes: 0,
     affectedAfterMinutes: 0,
@@ -235,6 +254,38 @@ function uniqueAdjustments(adjustments: RoomAdjustment[]) {
   });
 }
 
+export function getRoomMinutesNeeded(context: RoomContext, requestedMinutes?: number) {
+  const newTask = context.items.find((item) => item.originalIndex === context.newTaskIndex);
+  if (!newTask) return 0;
+  const expectedMinutes = requestedMinutes ?? newTask.durationMinutes;
+  const baselineItems = context.items.map((item) =>
+    item.originalIndex === context.newTaskIndex
+      ? {
+          ...item,
+          suggestedDay: "today" as const,
+          deferredByUser: false,
+          removedFromPlan: false,
+          todayDurationMinutes: expectedMinutes,
+          remainingDurationMinutes: Math.max(0, item.durationMinutes - expectedMinutes),
+        }
+      : { ...item },
+  );
+  const baselineWithNewTask = buildSchedule({
+    items: baselineItems,
+    order: [
+      ...context.order.filter((index) => index !== context.newTaskIndex),
+      context.newTaskIndex,
+    ],
+    nowMinutes: context.nowMinutes,
+    cutoffMinutes: context.cutoffMinutes,
+  });
+  const baselineNewTaskMinutes = Math.min(
+    expectedMinutes,
+    itemMinutes(baselineWithNewTask.schedule, context.newTaskIndex),
+  );
+  return Math.max(0, expectedMinutes - baselineNewTaskMinutes);
+}
+
 export function previewRoomAdjustments(
   context: RoomContext,
   adjustments: RoomAdjustment[],
@@ -257,25 +308,7 @@ export function previewRoomAdjustments(
       adjustment.kind === "start",
   );
   const expectedNewMinutes = partialStart?.sessionMinutes ?? newTask.durationMinutes;
-  const baselineItems = context.items.map((item) =>
-    item.originalIndex === context.newTaskIndex
-      ? { ...item, suggestedDay: "today" as const, deferredByUser: false, removedFromPlan: false }
-      : { ...item },
-  );
-  const baselineWithNewTask = buildSchedule({
-    items: baselineItems,
-    order: [
-      ...context.order.filter((index) => index !== context.newTaskIndex),
-      context.newTaskIndex,
-    ],
-    nowMinutes: context.nowMinutes,
-    cutoffMinutes: context.cutoffMinutes,
-  });
-  const baselineNewTaskMinutes = Math.min(
-    expectedNewMinutes,
-    itemMinutes(baselineWithNewTask.schedule, context.newTaskIndex),
-  );
-  const newTaskNeededMinutes = Math.max(0, expectedNewMinutes - baselineNewTaskMinutes);
+  const newTaskNeededMinutes = getRoomMinutesNeeded(context, expectedNewMinutes);
 
   let workingContext = context;
   let preview: RoomPreview | null = null;
@@ -316,10 +349,52 @@ export function previewRoomAdjustments(
   const affectedAfterMinutes =
     targetIndex === null ? 0 : itemMinutes(preview.result.schedule, targetIndex);
   const newTaskScheduledMinutes = itemMinutes(preview.result.schedule, preview.newTaskTodayIndex);
+  const impactedTargets = new Set<number>();
+  const impacts: RoomImpact[] = [];
+  for (const adjustment of deduplicated) {
+    if (adjustment.kind === "extend") {
+      impacts.push({
+        kind: adjustment.kind,
+        taskIndex: null,
+        title: "Available-until time",
+        beforeMinutes: context.cutoffMinutes,
+        afterMinutes: context.cutoffMinutes + adjustment.minutes,
+        minutesFreed: adjustment.minutes,
+      });
+      continue;
+    }
+    if (adjustment.kind === "start") {
+      impacts.push({
+        kind: adjustment.kind,
+        taskIndex: context.newTaskIndex,
+        title: newTask.title,
+        beforeMinutes: 0,
+        afterMinutes: adjustment.sessionMinutes,
+        minutesFreed: 0,
+      });
+      continue;
+    }
+    if (impactedTargets.has(adjustment.targetIndex)) continue;
+    impactedTargets.add(adjustment.targetIndex);
+    const impactedTask = context.items.find(
+      (item) => item.originalIndex === adjustment.targetIndex,
+    );
+    const beforeMinutes = itemMinutes(baseline.schedule, adjustment.targetIndex);
+    const afterMinutes = itemMinutes(preview.result.schedule, adjustment.targetIndex);
+    impacts.push({
+      kind: adjustment.kind,
+      taskIndex: adjustment.targetIndex,
+      title: impactedTask?.title ?? "Task",
+      beforeMinutes,
+      afterMinutes,
+      minutesFreed: Math.max(0, beforeMinutes - afterMinutes),
+    });
+  }
 
   preview.adjustment = primaryAdjustment;
   preview.adjustments = deduplicated;
   preview.changedItemIndexes = [...changedItemIndexes];
+  preview.impacts = impacts;
   preview.affectedTaskTitle = target?.title ?? null;
   preview.affectedCurrentMinutes = affectedCurrentMinutes;
   preview.affectedAfterMinutes = affectedAfterMinutes;
@@ -347,22 +422,8 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     nowMinutes: context.nowMinutes,
     cutoffMinutes: context.cutoffMinutes,
   });
-  const baselineItems = context.items.map((item) =>
-    item.originalIndex === newTask.originalIndex
-      ? { ...item, suggestedDay: "today" as const, deferredByUser: false, removedFromPlan: false }
-      : { ...item },
-  );
-  const baselineWithNewTask = buildSchedule({
-    items: baselineItems,
-    order: [
-      ...context.order.filter((index) => index !== newTask.originalIndex),
-      newTask.originalIndex,
-    ],
-    nowMinutes: context.nowMinutes,
-    cutoffMinutes: context.cutoffMinutes,
-  });
-  const baselineNewTaskMinutes = itemMinutes(baselineWithNewTask.schedule, newTask.originalIndex);
-  const minutesNeeded = Math.max(0, newTask.durationMinutes - baselineNewTaskMinutes);
+  const minutesNeeded = getRoomMinutesNeeded(context);
+  const baselineNewTaskMinutes = newTask.durationMinutes - minutesNeeded;
   const candidates = context.items
     .filter(
       (item) =>
@@ -380,6 +441,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     );
 
   const suggestions: RoomSuggestion[] = [];
+  const minimumSafeBlockMinutes = 15;
 
   for (const candidate of candidates) {
     const currentMinutes = itemMinutes(baseline.schedule, candidate.originalIndex);
@@ -387,7 +449,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     if (
       minutesNeeded <= 0 ||
       currentMinutes !== candidate.durationMinutes ||
-      keepMinutes <= 0 ||
+      keepMinutes < minimumSafeBlockMinutes ||
       keepMinutes >= candidate.durationMinutes
     ) {
       continue;
@@ -409,19 +471,49 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     break;
   }
 
-  for (const sessionMinutes of [15, 10, 5].filter((minutes) => minutes <= baselineNewTaskMinutes)) {
-    if (sessionMinutes >= newTask.durationMinutes) continue;
-    const adjustment: RoomAdjustment = { kind: "start", sessionMinutes };
-    const preview = previewRoomAdjustment(context, adjustment);
-    if (!preview?.enoughRoom || preview.newTaskScheduledMinutes < sessionMinutes) continue;
-    suggestions.push({
-      id: `start-${sessionMinutes}`,
-      title: "Use a shorter work session",
-      detail: `Fit a ${sessionMinutes}-minute start on “${newTask.title}” today and continue tomorrow. You’ll confirm before anything changes.`,
-      minutesCreated: sessionMinutes,
-      adjustment,
-    });
-    break;
+  if (suggestions.length === 0 && minutesNeeded > 0) {
+    const reductions: RoomAdjustment[] = [];
+    const reductionDetails: string[] = [];
+    let stillNeeded = minutesNeeded;
+    for (const candidate of candidates) {
+      const currentMinutes = itemMinutes(baseline.schedule, candidate.originalIndex);
+      const safelyAvailable = Math.max(0, currentMinutes - minimumSafeBlockMinutes);
+      const takeMinutes = Math.min(safelyAvailable, stillNeeded);
+      if (takeMinutes <= 0) continue;
+      reductions.push({
+        kind: "shorten",
+        targetIndex: candidate.originalIndex,
+        keepMinutes: currentMinutes - takeMinutes,
+      });
+      reductionDetails.push(`Shorten “${candidate.title}” by ${takeMinutes} minutes.`);
+      stillNeeded -= takeMinutes;
+      if (stillNeeded === 0) break;
+    }
+
+    const hasShorteningAdjustment = reductions.length > 0;
+    if (
+      hasShorteningAdjustment &&
+      stillNeeded > 0 &&
+      stillNeeded <= 60 &&
+      context.cutoffMinutes + stillNeeded <= 23 * 60 + 59
+    ) {
+      reductions.push({ kind: "extend", minutes: stillNeeded });
+      reductionDetails.push(`Use ${stillNeeded} more minutes today.`);
+      stillNeeded = 0;
+    }
+
+    if (hasShorteningAdjustment && stillNeeded === 0) {
+      const preview = previewRoomAdjustments(context, reductions);
+      if (preview?.enoughRoom && preview.newTaskScheduledMinutes >= newTask.durationMinutes) {
+        suggestions.push({
+          id: `combined-${reductions.map(adjustmentKey).join("-")}`,
+          title: `Make ${minutesNeeded} minutes of room`,
+          detail: `${reductionDetails.join(" ")} This creates exactly enough room for “${newTask.title}”. You’ll confirm before anything changes.`,
+          minutesCreated: minutesNeeded,
+          adjustment: reductions,
+        });
+      }
+    }
   }
 
   if (
@@ -442,22 +534,19 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     }
   }
 
-  if (suggestions.length === 0) {
-    for (const candidate of candidates) {
-      const adjustment: RoomAdjustment = { kind: "move", targetIndex: candidate.originalIndex };
-      const preview = previewRoomAdjustment(context, adjustment);
-      if (!preview?.enoughRoom || preview.newTaskScheduledMinutes < newTask.durationMinutes)
-        continue;
-      const minutes = itemMinutes(baseline.schedule, candidate.originalIndex);
-      suggestions.push({
-        id: `move-${candidate.originalIndex}`,
-        title: "Move a flexible task",
-        detail: `Move “${candidate.title}” to tomorrow and use its ${minutes} minutes for this. You’ll confirm before anything changes.`,
-        minutesCreated: minutes,
-        adjustment,
-      });
-      break;
-    }
+  for (const sessionMinutes of [15, 10, 5].filter((minutes) => minutes <= baselineNewTaskMinutes)) {
+    if (sessionMinutes >= newTask.durationMinutes) continue;
+    const adjustment: RoomAdjustment = { kind: "start", sessionMinutes };
+    const preview = previewRoomAdjustment(context, adjustment);
+    if (!preview?.enoughRoom || preview.newTaskScheduledMinutes < sessionMinutes) continue;
+    suggestions.push({
+      id: `start-${sessionMinutes}`,
+      title: "Use a shorter work session",
+      detail: `Fit a ${sessionMinutes}-minute start on “${newTask.title}” today and leave the rest for later. You’ll confirm before anything changes.`,
+      minutesCreated: sessionMinutes,
+      adjustment,
+    });
+    break;
   }
 
   return suggestions.slice(0, 3);

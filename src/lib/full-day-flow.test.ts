@@ -24,6 +24,16 @@ function task(
   };
 }
 
+function suggestionHasKind(
+  suggestion: ReturnType<typeof buildRoomSuggestions>[number],
+  kind: "move" | "shorten" | "start" | "remove" | "extend",
+) {
+  const adjustments = Array.isArray(suggestion.adjustment)
+    ? suggestion.adjustment
+    : [suggestion.adjustment];
+  return adjustments.some((adjustment) => adjustment.kind === kind);
+}
+
 describe("full day make-room flow", () => {
   it("never suggests moving a fixed commitment", () => {
     const items = [
@@ -79,7 +89,7 @@ describe("full day make-room flow", () => {
       nowMinutes: 20 * 60,
       cutoffMinutes: 21 * 60,
     });
-    expect(suggestions.some((suggestion) => suggestion.adjustment.kind === "move")).toBe(false);
+    expect(suggestions.some((suggestion) => suggestionHasKind(suggestion, "move"))).toBe(false);
   });
 
   it("previews changes without mutating the current plan", () => {
@@ -107,9 +117,13 @@ describe("full day make-room flow", () => {
       { kind: "start", sessionMinutes: 15 },
     );
     expect(preview).not.toBeNull();
-    expect(preview?.items.find((item) => item.originalIndex === 0)?.durationMinutes).toBe(30);
+    expect(preview?.items.find((item) => item.originalIndex === 0)?.durationMinutes).toBe(45);
+    expect(preview?.items.find((item) => item.originalIndex === 0)?.todayDurationMinutes).toBe(15);
+    expect(preview?.items.find((item) => item.originalIndex === 0)?.remainingDurationMinutes).toBe(
+      30,
+    );
     expect(preview?.result.schedule).toHaveLength(1);
-    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(true);
+    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
   });
 
   it("moving a 90-minute task creates enough room", () => {
@@ -219,7 +233,7 @@ describe("full day make-room flow", () => {
       targetIndex: 0,
       keepMinutes: 45,
     });
-    expect(suggestions.some((suggestion) => suggestion.adjustment.kind === "move")).toBe(false);
+    expect(suggestions.some((suggestion) => suggestionHasKind(suggestion, "move"))).toBe(false);
   });
 
   it("offers a reasonable stop-time extension before a whole-task move", () => {
@@ -294,5 +308,138 @@ describe("full day make-room flow", () => {
     expect(preview?.missingMinutes).toBe(0);
     expect(preview?.minutesLeftOver).toBe(0);
     expect(preview?.enoughRoom).toBe(true);
+  });
+
+  it("shortens a 90-minute block to 75 and keeps the original task today", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Chemistry worksheet",
+        durationMinutes: 90,
+        priority: "low",
+        dueDate: "2026-07-30",
+        dueCategory: "future",
+      }),
+      task({ originalIndex: 1, title: "test 7", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const context = {
+      items,
+      order: [0],
+      newTaskIndex: 1,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 19 * 60 + 30,
+    };
+    const suggestions = buildRoomSuggestions(context);
+    const preview = previewRoomAdjustment(context, {
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 75,
+    });
+    const chemistry = preview?.items.find((item) => item.originalIndex === 0);
+
+    expect(suggestions[0]?.adjustment).toEqual({
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 75,
+    });
+    expect(chemistry?.durationMinutes).toBe(90);
+    expect(chemistry?.todayDurationMinutes).toBe(75);
+    expect(chemistry?.remainingDurationMinutes).toBe(15);
+    expect(chemistry?.dueDate).toBe("2026-07-30");
+    expect(
+      preview?.items.filter((item) => item.title.includes("Chemistry worksheet")),
+    ).toHaveLength(1);
+    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 0)).toBe(false);
+  });
+
+  it("shortens a 60-minute block to 40 instead of moving the whole task", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Flexible task",
+        durationMinutes: 60,
+        priority: "low",
+      }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 20, suggestedDay: "tomorrow" }),
+    ];
+    const suggestions = buildRoomSuggestions({
+      items,
+      order: [0],
+      newTaskIndex: 1,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 19 * 60,
+    });
+
+    expect(suggestions[0]?.adjustment).toEqual({
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 40,
+    });
+  });
+
+  it("combines a safe 10-minute and 5-minute shortening without moving a whole task", () => {
+    const items = [
+      task({ originalIndex: 0, title: "First task", durationMinutes: 25, priority: "low" }),
+      task({ originalIndex: 1, title: "Second task", durationMinutes: 20, priority: "low" }),
+      task({ originalIndex: 2, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const context = {
+      items,
+      order: [0, 1],
+      newTaskIndex: 2,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 18 * 60 + 45,
+    };
+    const suggestions = buildRoomSuggestions(context);
+    const adjustments = suggestions[0]?.adjustment;
+
+    expect(adjustments).toEqual([
+      { kind: "shorten", targetIndex: 0, keepMinutes: 15 },
+      { kind: "shorten", targetIndex: 1, keepMinutes: 15 },
+    ]);
+    expect(
+      Array.isArray(adjustments) && adjustments.some((adjustment) => adjustment.kind === "move"),
+    ).toBe(false);
+    const preview = Array.isArray(adjustments)
+      ? previewRoomAdjustments(context, adjustments)
+      : null;
+    expect(preview?.minutesFreed).toBe(15);
+    expect(preview?.enoughRoom).toBe(true);
+  });
+
+  it("does not refill the exact gap with an unrelated overflow task", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Chemistry worksheet",
+        durationMinutes: 60,
+        priority: "low",
+      }),
+      task({
+        originalIndex: 1,
+        title: "Unrelated low-priority task",
+        durationMinutes: 30,
+        priority: "low",
+      }),
+      task({ originalIndex: 2, title: "New task", durationMinutes: 15, suggestedDay: "tomorrow" }),
+    ];
+    const context = {
+      items,
+      order: [0, 1],
+      newTaskIndex: 2,
+      nowMinutes: 18 * 60,
+      cutoffMinutes: 19 * 60,
+    };
+    const preview = previewRoomAdjustment(context, {
+      kind: "shorten",
+      targetIndex: 0,
+      keepMinutes: 45,
+    });
+
+    expect(
+      preview?.result.schedule.filter((entry) => entry.kind === "task").map((entry) => entry.title),
+    ).toEqual(["Chemistry worksheet", "New task"]);
+    expect(preview?.items.find((item) => item.originalIndex === 1)?.todayDurationMinutes).toBe(0);
+    expect(preview?.result.tomorrow.some((item) => item.itemIndex === 1)).toBe(true);
   });
 });
