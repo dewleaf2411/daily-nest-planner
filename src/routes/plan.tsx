@@ -1900,56 +1900,33 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {fullDayFlow.stage === "preview" && roomPreview && (
                 <>
                   <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
-                    Here’s what will change
+                    Preview
                   </h3>
                   <div className="mt-4 rounded-2xl border border-border bg-background p-4">
                     <p className="text-sm font-medium text-foreground">
-                      Make {formatDuration(roomPreview.minutesFreed || roomPreview.newTaskScheduledMinutes)} of room
+                      {roomPreview.enoughRoom
+                        ? `Room made for “${newTask.title}”`
+                        : `Need ${formatDuration(roomPreview.missingMinutes)} more room`}
                     </p>
-                    <ul className="mt-3 space-y-3">
+                    <ul className="mt-3 space-y-2">
                       {roomPreview.impacts.map((impact, index) => (
-                        <li key={`${impact.kind}-${impact.taskIndex ?? "time"}-${index}`}>
-                          <p className="text-sm text-foreground">
-                            {impact.kind === "shorten" &&
-                              `Shorten ${impact.title} by ${formatDuration(impact.minutesFreed)}.`}
-                            {impact.kind === "move" && `Move the entire ${impact.title} to tomorrow.`}
-                            {impact.kind === "remove" && `Take ${impact.title} out of today’s plan.`}
-                            {impact.kind === "extend" &&
-                              `Use ${formatDuration(impact.minutesFreed)} more today.`}
-                            {impact.kind === "start" &&
-                              `Give ${impact.title} a ${formatDuration(impact.afterMinutes)} block today.`}
-                          </p>
-                          {impact.taskIndex !== null && impact.kind !== "start" && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {formatDuration(impact.beforeMinutes)} → {formatDuration(impact.afterMinutes)}
-                            </p>
-                          )}
+                        <li key={`${impact.kind}-${impact.taskIndex ?? "time"}-${index}`} className="text-sm text-foreground">
+                          {impact.kind === "shorten" &&
+                            `${impact.title}: ${formatDuration(impact.beforeMinutes)} → ${formatDuration(impact.afterMinutes)}`}
+                          {impact.kind === "move" && `Move ${impact.title} to tomorrow`}
+                          {impact.kind === "remove" && `Remove ${impact.title} from today`}
+                          {impact.kind === "extend" && `Extend today by ${formatDuration(impact.minutesFreed)}`}
+                          {impact.kind === "start" && `Add ${impact.title} today`}
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                      {roomPreview.enoughRoom
-                        ? `This creates enough room for “${newTask.title}”.`
-                        : `“${newTask.title}” needs ${formatDuration(roomPreview.newTaskNeededMinutes)}, so you still need to create ${formatDuration(roomPreview.missingMinutes)} more.`}
-                    </p>
-                    {roomPreview.enoughRoom && roomPreview.minutesLeftOver > 0 && (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {formatDuration(roomPreview.minutesLeftOver)} will remain open.
-                      </p>
-                    )}
-                  </div>
-                  {roomPreview.enoughRoom && (
-                    <div className="mt-5 rounded-2xl border border-border bg-background p-4">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        “{newTask.title}” will fit here
-                      </p>
-                      <p className="mt-2 text-sm text-foreground">
-                        Added today for {formatDuration(roomPreview.newTaskScheduledMinutes)}
-                      </p>
-                      <ul className="mt-3 space-y-2">
-                        {roomPreview.result.schedule
-                          .filter((entry) => entry.itemIndex === roomPreview.newTaskTodayIndex)
-                          .map((entry) => (
+                    {roomPreview.enoughRoom && (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          New time blocks
+                        </p>
+                        <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                          {roomPreview.result.schedule.map((entry) => (
                             <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
                               <span className="truncate text-foreground">{entry.title}</span>
                               <span className="shrink-0 text-xs text-muted-foreground">
@@ -1957,23 +1934,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                               </span>
                             </li>
                           ))}
-                      </ul>
-                      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Updated time blocks
-                      </p>
-                      <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto">
-                        {roomPreview.result.schedule.map((entry) => (
-                          <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
-                            <span className="truncate text-foreground">{entry.title}</span>
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  <div className="mt-6 space-y-3">
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-5 space-y-2">
                     {roomPreview.enoughRoom ? (
                       <button
                         type="button"
@@ -1988,18 +1953,13 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         onClick={() =>
                           setFullDayFlow((current) =>
                             current
-                              ? {
-                                  ...current,
-                                  stage: "choose",
-                                  adjustment: null,
-                                  message: null,
-                                }
+                              ? { ...current, stage: "choose", adjustment: null, message: null }
                               : current,
                           )
                         }
                         className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                       >
-                        Choose another adjustment
+                        Adjust more
                       </button>
                     )}
                     <button
@@ -2007,18 +1967,13 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       onClick={() =>
                         setFullDayFlow((current) =>
                           current
-                            ? {
-                                ...current,
-                                stage: current.previewFrom,
-                                adjustment: null,
-                                message: null,
-                              }
+                            ? { ...current, stage: current.previewFrom, adjustment: null, message: null }
                             : current,
                         )
                       }
                       className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground hover:bg-accent"
                     >
-                      {roomPreview.enoughRoom ? "Choose a different adjustment" : "Go back"}
+                      Back
                     </button>
                   </div>
                 </>
