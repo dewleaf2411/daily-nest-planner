@@ -5,6 +5,11 @@ import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCirc
 import { planTasks } from "@/lib/planner.functions";
 import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
+import {
+  buildRoomSuggestions,
+  previewRoomAdjustment,
+  type RoomAdjustment,
+} from "@/lib/full-day-flow";
 import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
@@ -136,6 +141,16 @@ interface CrowdedProposal {
   availableMin: number;
 }
 
+interface FullDayFlow {
+  taskIndex: number;
+  stage: "notice" | "suggestions" | "choose" | "preview";
+  adjustment: RoomAdjustment | null;
+  previewFrom: "suggestions" | "choose";
+  manualTargetIndex: number | null;
+  manualKeepMinutes: number;
+  message: string | null;
+}
+
 function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
 
@@ -170,6 +185,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [confirmNewPlan, setConfirmNewPlan] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [showAffectedTasks, setShowAffectedTasks] = useState(false);
+  const [fullDayFlow, setFullDayFlow] = useState<FullDayFlow | null>(null);
   const hydratedRef = useRef(false);
   const presentedConflictKeyRef = useRef("");
   const stopTimeControlRef = useRef<HTMLDivElement | null>(null);
@@ -292,6 +308,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setStatus(null);
     setError(null);
     setShowConflictModal(false);
+    setFullDayFlow(null);
     presentedConflictKeyRef.current = "";
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     try { localStorage.removeItem(PLAN_STORAGE_KEY); } catch { /* ignore */ }
@@ -316,12 +333,32 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
   }, [items, order, nowMinutes, cutoffMinutes]);
 
+  const roomContext = useMemo(
+    () =>
+      items && fullDayFlow
+        ? { items, order, newTaskIndex: fullDayFlow.taskIndex, nowMinutes, cutoffMinutes }
+        : null,
+    [cutoffMinutes, fullDayFlow, items, nowMinutes, order],
+  );
+  const roomSuggestions = useMemo(
+    () => (roomContext ? buildRoomSuggestions(roomContext) : []),
+    [roomContext],
+  );
+  const roomPreview = useMemo(
+    () =>
+      roomContext && fullDayFlow?.adjustment
+        ? previewRoomAdjustment(roomContext, fullDayFlow.adjustment)
+        : null,
+    [fullDayFlow?.adjustment, roomContext],
+  );
+
   useEffect(() => {
     if (
       !items ||
       loading ||
       conflicts.length === 0 ||
       crowded ||
+      fullDayFlow ||
       showGuestCard ||
       confirmNewPlan ||
       presentedConflictKeyRef.current === "shown"
@@ -330,7 +367,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     }
     presentedConflictKeyRef.current = "shown";
     setShowConflictModal(true);
-  }, [conflicts.length, confirmNewPlan, crowded, items, loading, showGuestCard]);
+  }, [conflicts.length, confirmNewPlan, crowded, fullDayFlow, items, loading, showGuestCard]);
 
   const pushHistory = () => {
     if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil };
@@ -683,16 +720,59 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       .filter((entry) => entry.kind === "task" && entry.itemIndex === idx)
       .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
 
-    setItems(nextItems);
-    setUserOrder(nextOrder);
     setAddMode(null);
 
     if (scheduledForTask < duration) {
-      flashStatus("Task added — some of it may not fit before your available-until time.");
+      const tomorrowItem = { ...newItem, suggestedDay: "tomorrow" as const, deferredByUser: true };
+      setItems(items ? [...items, tomorrowItem] : [tomorrowItem]);
+      setUserOrder(userOrder);
+      setFullDayFlow({
+        taskIndex: idx,
+        stage: "notice",
+        adjustment: null,
+        previewFrom: "suggestions",
+        manualTargetIndex: null,
+        manualKeepMinutes: 15,
+        message: null,
+      });
     } else {
+      setItems(nextItems);
+      setUserOrder(nextOrder);
       flashStatus("Task added.");
     }
 
+  };
+
+  const closeFullDayFlow = () => setFullDayFlow(null);
+
+  const undoFullDayPlacement = () => {
+    setFullDayFlow(null);
+    undo();
+  };
+
+  const selectRoomAdjustment = (adjustment: RoomAdjustment, from: "suggestions" | "choose") => {
+    if (!roomContext || !previewRoomAdjustment(roomContext, adjustment)) {
+      setFullDayFlow((current) =>
+        current
+          ? { ...current, message: "That adjustment doesn’t create enough room before your stop time." }
+          : current,
+      );
+      return;
+    }
+    setFullDayFlow((current) =>
+      current
+        ? { ...current, stage: "preview", adjustment, previewFrom: from, message: null }
+        : current,
+    );
+  };
+
+  const applyRoomPreview = () => {
+    if (!roomPreview) return;
+    pushHistory();
+    setItems(roomPreview.items);
+    setUserOrder(roomPreview.order);
+    setFullDayFlow(null);
+    flashStatus("Your plan was updated.");
   };
 
   const submitAddBreak = () => {
@@ -1460,7 +1540,320 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         </p>
       </div>
 
-      {showConflictModal && conflicts.length > 0 && items && !crowded && !showGuestCard && !confirmNewPlan && (
+      {fullDayFlow && items && !showGuestCard && !confirmNewPlan && (() => {
+        const newTask = items.find((item) => item.originalIndex === fullDayFlow.taskIndex);
+        if (!newTask) return null;
+        const manualTasks = items.filter(
+          (item) =>
+            item.originalIndex !== newTask.originalIndex &&
+            item.suggestedDay === "today" &&
+            !item.isFixed &&
+            schedule.some((entry) => entry.itemIndex === item.originalIndex),
+        );
+        const selectedManualTask = manualTasks.find(
+          (item) => item.originalIndex === fullDayFlow.manualTargetIndex,
+        );
+
+        return (
+          <div
+            className="fixed inset-0 z-[60] flex items-end justify-center bg-foreground/15 px-0 sm:px-4 sm:pb-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeFullDayFlow();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="full-day-sheet-title"
+              className="w-full max-w-xl rounded-t-3xl border border-border bg-card px-6 pb-7 pt-6 shadow-xl sm:rounded-3xl sm:px-8 sm:pb-8"
+            >
+              {fullDayFlow.stage === "notice" && (
+                <>
+                  <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
+                    Today is already full
+                  </h3>
+                  <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+                    “{newTask.title}” was placed tomorrow because there isn’t enough realistic time left today.
+                  </p>
+                  <div className="mt-8 space-y-3">
+                    <button
+                      type="button"
+                      onClick={closeFullDayFlow}
+                      className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      Keep it tomorrow
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFullDayFlow((current) =>
+                          current ? { ...current, stage: "suggestions", message: null } : current,
+                        )
+                      }
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium text-foreground hover:bg-accent"
+                    >
+                      Make room today
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={undoFullDayPlacement}
+                    className="mx-auto mt-5 block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  >
+                    Undo
+                  </button>
+                </>
+              )}
+
+              {fullDayFlow.stage === "suggestions" && (
+                <>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
+                        Make room for “{newTask.title}”
+                      </h3>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Choose a small adjustment. Your due dates will stay the same.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeFullDayFlow}
+                      aria-label="Close"
+                      className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-6 space-y-3">
+                    {roomSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion.id}
+                        type="button"
+                        onClick={() => selectRoomAdjustment(suggestion.adjustment, "suggestions")}
+                        className="w-full rounded-2xl border border-border bg-background p-4 text-left hover:bg-accent/60"
+                      >
+                        <span className="block text-sm font-medium text-foreground">{suggestion.title}</span>
+                        <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">
+                          {suggestion.detail}
+                        </span>
+                      </button>
+                    ))}
+                    {roomSuggestions.length === 0 && (
+                      <p className="rounded-2xl bg-secondary/50 p-4 text-sm leading-relaxed text-muted-foreground">
+                        There isn’t an obvious task to move, but you can choose one yourself.
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFullDayFlow((current) =>
+                        current ? { ...current, stage: "choose", message: null } : current,
+                      )
+                    }
+                    className="mt-5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    Choose myself
+                  </button>
+                </>
+              )}
+
+              {fullDayFlow.stage === "choose" && (
+                <>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
+                        Choose a task
+                      </h3>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Fixed commitments stay where they are. Your due dates will not change.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeFullDayFlow}
+                      aria-label="Close"
+                      className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-5 max-h-52 space-y-2 overflow-y-auto pr-1">
+                    {manualTasks.map((task) => (
+                      <button
+                        key={task.originalIndex}
+                        type="button"
+                        onClick={() =>
+                          setFullDayFlow((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  manualTargetIndex: task.originalIndex,
+                                  manualKeepMinutes: Math.min(20, Math.max(5, task.durationMinutes - 5)),
+                                  message: null,
+                                }
+                              : current,
+                          )
+                        }
+                        className={`flex w-full items-center justify-between rounded-xl border p-3 text-left ${
+                          selectedManualTask?.originalIndex === task.originalIndex
+                            ? "border-primary bg-secondary/60"
+                            : "border-border bg-background"
+                        }`}
+                      >
+                        <span className="text-sm font-medium text-foreground">{task.title}</span>
+                        <span className="text-xs text-muted-foreground">{formatDuration(task.durationMinutes)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedManualTask && (
+                    <div className="mt-5 space-y-3 border-t border-border pt-5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectRoomAdjustment(
+                            { kind: "move", targetIndex: selectedManualTask.originalIndex },
+                            "choose",
+                          )
+                        }
+                        className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground hover:bg-accent"
+                      >
+                        Move to tomorrow
+                      </button>
+                      <div className="rounded-xl border border-border bg-background p-3">
+                        <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                          <span>Shorten today’s work block to</span>
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={5}
+                              max={Math.max(5, selectedManualTask.durationMinutes - 5)}
+                              step={5}
+                              value={fullDayFlow.manualKeepMinutes}
+                              onChange={(event) =>
+                                setFullDayFlow((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        manualKeepMinutes: Math.max(5, Number(event.target.value) || 5),
+                                        message: null,
+                                      }
+                                    : current,
+                                )
+                              }
+                              className="w-16 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
+                            />
+                            min
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              {
+                                kind: "shorten",
+                                targetIndex: selectedManualTask.originalIndex,
+                                keepMinutes: fullDayFlow.manualKeepMinutes,
+                              },
+                              "choose",
+                            )
+                          }
+                          className="mt-3 text-xs font-medium text-primary underline-offset-4 hover:underline"
+                        >
+                          Preview shortening
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectRoomAdjustment(
+                            { kind: "remove", targetIndex: selectedManualTask.originalIndex },
+                            "choose",
+                          )
+                        }
+                        className="w-full rounded-xl px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        Remove from today’s plan without deleting
+                      </button>
+                    </div>
+                  )}
+                  {manualTasks.length === 0 && (
+                    <p className="mt-5 text-sm text-muted-foreground">
+                      There are no flexible task blocks to adjust.
+                    </p>
+                  )}
+                  {fullDayFlow.message && (
+                    <p className="mt-4 text-xs text-muted-foreground">{fullDayFlow.message}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFullDayFlow((current) =>
+                        current ? { ...current, stage: "suggestions", message: null } : current,
+                      )
+                    }
+                    className="mt-5 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Go back
+                  </button>
+                </>
+              )}
+
+              {fullDayFlow.stage === "preview" && roomPreview && (
+                <>
+                  <h3 id="full-day-sheet-title" className="font-serif text-2xl text-foreground">
+                    Here’s what will change
+                  </h3>
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{roomPreview.summary}</p>
+                  <div className="mt-5 rounded-2xl border border-border bg-background p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Updated time blocks</p>
+                    <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                      {roomPreview.result.schedule.map((entry) => (
+                        <li key={entry.id} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="truncate text-foreground">{entry.title}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="mt-6 space-y-3">
+                    <button
+                      type="button"
+                      onClick={applyRoomPreview}
+                      className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      Update my plan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFullDayFlow((current) =>
+                          current
+                            ? {
+                                ...current,
+                                stage: current.previewFrom,
+                                adjustment: null,
+                                message: null,
+                              }
+                            : current,
+                        )
+                      }
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground hover:bg-accent"
+                    >
+                      Go back
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {showConflictModal && conflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
           <div role="dialog" aria-modal="true" aria-labelledby="conflict-modal-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
             <div className="flex items-start justify-between gap-4">
