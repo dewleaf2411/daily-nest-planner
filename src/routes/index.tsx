@@ -225,8 +225,8 @@ function Landing() {
               },
               {
                 icon: Wind,
-                title: "Simple & soothing",
-                text: "A clean space to think, plan, and breathe.",
+                title: "Simple & Fast",
+                text: "A quick efficient space to plan",
               },
               {
                 icon: Feather,
