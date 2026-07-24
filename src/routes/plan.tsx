@@ -2046,6 +2046,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   </div>
                 </>
               )}
+              </div>
             </div>
           </div>
         );
