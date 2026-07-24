@@ -158,6 +158,19 @@ describe("full day make-room flow", () => {
     expect(preview?.enoughRoom).toBe(true);
   });
 
+  it("rejects fractional minutes when shortening a task", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Chemistry worksheet", durationMinutes: 60 }),
+      task({ originalIndex: 1, title: "New task", durationMinutes: 20, suggestedDay: "tomorrow" }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [0], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      { kind: "shorten", targetIndex: 0, keepMinutes: 40.5 },
+    );
+
+    expect(preview).toBeNull();
+  });
+
   it("previews an insufficient removal and keeps the task out of Tomorrow", () => {
     const items = [
       task({ originalIndex: 0, title: "Short task", durationMinutes: 20 }),

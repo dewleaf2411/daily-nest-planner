@@ -142,6 +142,7 @@ function applyDraft(context: RoomContext, adjustment: RoomAdjustment): RoomPrevi
     if (
       !target ||
       target.isFixed ||
+      !Number.isInteger(adjustment.keepMinutes) ||
       adjustment.keepMinutes < 1 ||
       adjustment.keepMinutes >= currentTodayMinutes
     ) {
