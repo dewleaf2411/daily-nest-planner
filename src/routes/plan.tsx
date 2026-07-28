@@ -1898,7 +1898,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                             "choose",
                           )
                         }
-                        className="mt-4 inline-flex items-center justify-center rounded-xl border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted"
+                        className="mt-4 inline-flex items-center justify-center rounded-xl border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                       >
                         Move entire task to tomorrow
                       </button>
