@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Leaf, ArrowLeft, Plus, Trash2, Pencil, Check, X, Loader2, Calendar, Shield, LogOut, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
-import { setCommitmentOccurrenceEnabled } from "@/lib/commitments";
+import {
+  groupCommitmentsByEvent,
+  groupCommitmentsByWeek,
+  setCommitmentGroupEnabled,
+  setCommitmentOccurrenceEnabled,
+  type CommitmentEventGroup,
+} from "@/lib/commitments";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsRoute,
@@ -339,7 +345,9 @@ function CommitmentsSection({
   setCommitments: React.Dispatch<React.SetStateAction<Commitment[]>>;
   flash: (m: string) => void;
 }) {
-  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [view, setView] = useState<"event" | "week">("event");
+  const [editing, setEditing] = useState<string | "new" | "event" | null>(null);
+  const [editingEventIds, setEditingEventIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<{ commitment: Commitment; day: number } | null>(null);
   const [form, setForm] = useState<Omit<Commitment, "id">>({
     name: "",
@@ -349,23 +357,34 @@ function CommitmentsSection({
     enabled: true,
   });
 
-  const grouped = useMemo(() => {
-    const map: Record<number, Commitment[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-    for (const c of commitments) {
-      for (const d of c.days_of_week) if (map[d]) map[d].push(c);
-    }
-    return map;
-  }, [commitments]);
+  const grouped = useMemo(() => groupCommitmentsByWeek(commitments), [commitments]);
+  const eventGroups = useMemo(() => groupCommitmentsByEvent(commitments), [commitments]);
 
   const beginNew = () => {
+    setEditingEventIds([]);
     setForm({ name: "", days_of_week: [], start_time: "09:00", end_time: "10:00", enabled: true });
     setEditing("new");
   };
   const beginEdit = (c: Commitment) => {
+    setEditingEventIds([]);
     setForm({ name: c.name, days_of_week: c.days_of_week, start_time: c.start_time, end_time: c.end_time, enabled: c.enabled });
     setEditing(c.id);
   };
-  const cancel = () => setEditing(null);
+  const beginEventEdit = (group: CommitmentEventGroup<Commitment>) => {
+    setEditingEventIds(group.commitments.map((commitment) => commitment.id));
+    setForm({
+      name: group.name,
+      days_of_week: group.days,
+      start_time: group.start_time,
+      end_time: group.end_time,
+      enabled: group.allEnabled,
+    });
+    setEditing("event");
+  };
+  const cancel = () => {
+    setEditing(null);
+    setEditingEventIds([]);
+  };
 
   const save = async () => {
     if (!form.name.trim() || form.days_of_week.length === 0) {
@@ -384,6 +403,23 @@ function CommitmentsSection({
         .single();
       if (error || !data) { flash("Couldn't save."); return; }
       setCommitments((prev) => [...prev, data as unknown as Commitment]);
+    } else if (editing === "event") {
+      const updates = {
+        name: form.name.trim(),
+        start_time: form.start_time,
+        end_time: form.end_time,
+      };
+      const { error } = await supabase
+        .from("fixed_commitments")
+        .update(updates)
+        .in("id", editingEventIds);
+      if (error) { flash("Couldn't save."); return; }
+      const matchingIds = new Set(editingEventIds);
+      setCommitments((prev) =>
+        prev.map((commitment) =>
+          matchingIds.has(commitment.id) ? { ...commitment, ...updates } : commitment,
+        ),
+      );
     } else if (editing) {
       const { data, error } = await supabase
         .from("fixed_commitments")
@@ -395,6 +431,7 @@ function CommitmentsSection({
       setCommitments((prev) => prev.map((c) => (c.id === editing ? (data as unknown as Commitment) : c)));
     }
     setEditing(null);
+    setEditingEventIds([]);
     flash("Saved.");
   };
 
@@ -468,6 +505,31 @@ function CommitmentsSection({
     flash(`Removed for ${DAY_LONG[day]}.`);
   };
 
+  const setEventEnabled = async (group: CommitmentEventGroup<Commitment>, enabled: boolean) => {
+    const ids = group.commitments.map((commitment) => commitment.id);
+    const { error } = await supabase
+      .from("fixed_commitments")
+      .update({ enabled })
+      .in("id", ids);
+    if (error) {
+      flash("Couldn't update this commitment.");
+      return;
+    }
+    setCommitments((prev) => setCommitmentGroupEnabled(prev, ids, enabled));
+  };
+
+  const removeEvent = async (group: CommitmentEventGroup<Commitment>) => {
+    const ids = group.commitments.map((commitment) => commitment.id);
+    const { error } = await supabase.from("fixed_commitments").delete().in("id", ids);
+    if (error) {
+      flash("Couldn't remove this commitment.");
+      return;
+    }
+    const matchingIds = new Set(ids);
+    setCommitments((prev) => prev.filter((commitment) => !matchingIds.has(commitment.id)));
+    flash("Removed.");
+  };
+
   const toggleDay = (d: number) => {
     setForm((f) => ({
       ...f,
@@ -480,11 +542,95 @@ function CommitmentsSection({
       title="Weekly fixed commitments"
       subtitle="Class, practice, work — DailyNest will schedule around these."
     >
+      <div
+        className="mb-4 inline-flex rounded-lg border border-border bg-background p-1"
+        role="group"
+        aria-label="Commitment view"
+      >
+        <button
+          type="button"
+          onClick={() => setView("event")}
+          aria-pressed={view === "event"}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+            view === "event"
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          By event
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("week")}
+          aria-pressed={view === "week"}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+            view === "week"
+              ? "bg-secondary text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          By week
+        </button>
+      </div>
+
       {commitments.length === 0 && editing !== "new" && (
         <p className="text-sm text-muted-foreground mb-4">No commitments yet.</p>
       )}
 
-      {commitments.length > 0 && (
+      {view === "event" && eventGroups.length > 0 && (
+        <ul className="space-y-2 mb-4">
+          {eventGroups.map((group) => (
+            <li
+              key={group.key}
+              className={`rounded-lg border border-border px-3 py-3 ${
+                group.activeDays > 0 ? "bg-background" : "bg-secondary/30 opacity-70"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{group.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {group.start_time} – {group.end_time}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {group.days.map((day) => DAY_LONG[day]).join(", ")}
+                  </p>
+                  {group.activeDays < group.totalDays && (
+                    <p className="mt-1 text-xs font-medium text-muted-foreground">
+                      {group.activeDays} of {group.totalDays} days active
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => beginEventEdit(group)}
+                    className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/60"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEventEnabled(group, group.activeDays === 0)}
+                    className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/60"
+                  >
+                    {group.activeDays === 0 ? "Enable all" : "Disable all"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeEvent(group)}
+                    className="rounded-md border border-destructive/40 bg-card px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {view === "week" && commitments.length > 0 && (
         <div className="space-y-3 mb-4">
           {DAY_LABELS.map((label, d) => {
             const items = grouped[d];
@@ -556,24 +702,32 @@ function CommitmentsSection({
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
             />
           </Field>
-          <Field label="Days">
-            <div className="flex flex-wrap gap-1.5">
-              {DAY_LABELS.map((label, d) => (
-                <button
-                  type="button"
-                  key={d}
-                  onClick={() => toggleDay(d)}
-                  className={`h-9 w-11 rounded-md text-xs font-medium border transition ${
-                    form.days_of_week.includes(d)
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </Field>
+          {editing === "event" ? (
+            <Field label="Scheduled days">
+              <p className="text-sm text-muted-foreground">
+                {form.days_of_week.map((day) => DAY_LONG[day]).join(", ")}
+              </p>
+            </Field>
+          ) : (
+            <Field label="Days">
+              <div className="flex flex-wrap gap-1.5">
+                {DAY_LABELS.map((label, d) => (
+                  <button
+                    type="button"
+                    key={d}
+                    onClick={() => toggleDay(d)}
+                    className={`h-9 w-11 rounded-md text-xs font-medium border transition ${
+                      form.days_of_week.includes(d)
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
               <WheelTimePicker
@@ -590,15 +744,17 @@ function CommitmentsSection({
               />
             </Field>
           </div>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-              className="h-4 w-4 accent-primary"
-            />
-            Enabled
-          </label>
+          {editing !== "event" && (
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+                className="h-4 w-4 accent-primary"
+              />
+              Enabled
+            </label>
+          )}
           <div className="flex gap-2 pt-1">
             <button
               onClick={save}
