@@ -434,6 +434,7 @@ export function buildRoomSuggestions(context: RoomContext): RoomSuggestion[] {
     .filter(
       (item) =>
         item.originalIndex !== newTask.originalIndex &&
+        item.itemType !== "break" &&
         item.suggestedDay === "today" &&
         !item.isFixed &&
         itemMinutes(baseline.schedule, item.originalIndex) > 0 &&

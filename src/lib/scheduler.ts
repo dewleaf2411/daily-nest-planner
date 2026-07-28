@@ -41,6 +41,7 @@ export interface BuildOptions {
   order: number[];
   nowMinutes: number;
   cutoffMinutes: number;
+  suppressedBreakIds?: string[];
 }
 
 export interface BuildResult {
@@ -74,8 +75,15 @@ function mergeOccupiedTime(fixed: FixedSlot[]): OccupiedSlot[] {
   return merged;
 }
 
-export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: BuildOptions): BuildResult {
+export function buildSchedule({
+  items,
+  order,
+  nowMinutes,
+  cutoffMinutes,
+  suppressedBreakIds = [],
+}: BuildOptions): BuildResult {
   const byIdx = new Map(items.map((item) => [item.originalIndex, item]));
+  const suppressedBreaks = new Set(suppressedBreakIds);
   const schedule: ScheduleEntry[] = [];
   const tomorrow: TomorrowEntry[] = [];
   const addTomorrow = (item: PlanItem, minutes: number, reason?: string) => {
@@ -98,7 +106,11 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   const fixed = items
     .filter(
       (item) =>
-        !item.removedFromPlan && item.isFixed && item.fixedStart && item.suggestedDay === "today",
+        !item.removedFromPlan &&
+        item.itemType !== "break" &&
+        item.isFixed &&
+        item.fixedStart &&
+        item.suggestedDay === "today",
     )
     .map((item) => {
       const start = hhmmToMinutes(item.fixedStart!);
@@ -106,7 +118,23 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       return { item, start, end: requestedEnd > start ? requestedEnd : start + item.durationMinutes };
     })
     .sort((a, b) => a.start - b.start || a.end - b.end);
-  const occupied = mergeOccupiedTime(fixed);
+  const breaks = items
+    .filter(
+      (item) =>
+        !item.removedFromPlan &&
+        item.itemType === "break" &&
+        item.fixedStart &&
+        item.suggestedDay === "today",
+    )
+    .map((item) => {
+      const start = hhmmToMinutes(item.fixedStart!);
+      return { item, start, end: Math.min(cutoffMinutes, start + item.durationMinutes) };
+    })
+    .filter((slot) => slot.end > slot.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const occupied = mergeOccupiedTime(
+    [...fixed, ...breaks].sort((a, b) => a.start - b.start || a.end - b.end),
+  );
 
   for (const slot of fixed) {
     schedule.push({
@@ -123,6 +151,17 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       isFixed: true,
     });
   }
+  for (const slot of breaks) {
+    schedule.push({
+      id: `break-${slot.item.originalIndex}`,
+      itemIndex: slot.item.originalIndex,
+      kind: "break",
+      title: slot.item.title,
+      startMinutes: slot.start,
+      endMinutes: slot.end,
+      isLockedBreak: slot.item.breakLocked === true,
+    });
+  }
 
   const flexibleQueue: PlanItem[] = [];
   const queued = new Set<number>();
@@ -132,6 +171,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       !item ||
       item.removedFromPlan ||
       item.isFixed ||
+      item.itemType === "break" ||
       item.suggestedDay !== "today" ||
       todayDuration(item) <= 0 ||
       queued.has(idx)
@@ -159,7 +199,12 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
   );
 
   for (const item of items) {
-    if (!item.removedFromPlan && !item.isFixed && item.suggestedDay === "tomorrow") {
+    if (
+      !item.removedFromPlan &&
+      !item.isFixed &&
+      item.itemType !== "break" &&
+      item.suggestedDay === "tomorrow"
+    ) {
       addTomorrow(
         item,
         item.remainingDurationMinutes ?? item.durationMinutes,
@@ -169,6 +214,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
     if (
       !item.removedFromPlan &&
       !item.isFixed &&
+      item.itemType !== "break" &&
       item.suggestedDay === "today" &&
       (item.remainingDurationMinutes ?? 0) > 0
     ) {
@@ -260,9 +306,14 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
         const collidesWithFixed = occupied.some(
           (slot) => slot.start < breakEnd && slot.end > breakStart,
         );
-        if (breakEnd <= cutoffMinutes && !collidesWithFixed) {
+        const breakId = `br-${item.originalIndex}-${blockNum}`;
+        if (
+          breakEnd <= cutoffMinutes &&
+          !collidesWithFixed &&
+          !suppressedBreaks.has(breakId)
+        ) {
           schedule.push({
-            id: `br-${item.originalIndex}-${blockNum}`,
+            id: breakId,
             itemIndex: -1,
             kind: "break",
             title: "Short break",
@@ -282,24 +333,36 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   schedule.sort((a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes);
   const filled: ScheduleEntry[] = [];
+  const breakSlots = new Set<string>();
   const gapThreshold = 10;
   let coveredUntil = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < schedule.length; i += 1) {
     const current = schedule[i];
-    filled.push(current);
+    const currentBreakSlot = `${current.startMinutes}`;
+    if (current.kind !== "break" || !breakSlots.has(currentBreakSlot)) {
+      filled.push(current);
+      if (current.kind === "break") breakSlots.add(currentBreakSlot);
+    }
     coveredUntil = Math.max(coveredUntil, current.endMinutes);
     const next = schedule[i + 1];
     if (!next) continue;
     const gap = next.startMinutes - coveredUntil;
-    if (gap >= gapThreshold) {
+    const gapId = `gap-${coveredUntil}-${next.startMinutes}`;
+    const gapSlot = `${coveredUntil}`;
+    if (
+      gap >= gapThreshold &&
+      !suppressedBreaks.has(gapId) &&
+      !breakSlots.has(gapSlot)
+    ) {
       filled.push({
-        id: `gap-${coveredUntil}-${next.startMinutes}`,
+        id: gapId,
         itemIndex: -1,
         kind: "break",
         title: gap >= 30 ? "Rest & recharge" : "Breather",
         startMinutes: coveredUntil,
         endMinutes: next.startMinutes,
       });
+      breakSlots.add(gapSlot);
     }
   }
 
@@ -314,7 +377,7 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   const remainingByItem = new Map<number, number>();
   for (const item of items) {
-    if (item.isFixed || item.removedFromPlan) continue;
+    if (item.itemType === "break" || item.isFixed || item.removedFromPlan) continue;
     const scheduledForToday = scheduledTaskMinutes.get(item.originalIndex) ?? 0;
     const remaining = Math.max(0, todayDuration(item) - scheduledForToday);
     if (remaining > 0) remainingByItem.set(item.originalIndex, remaining);
@@ -336,18 +399,40 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
       }
     }
   }
+  for (const breakSlot of breaks) {
+    const otherSlots = [
+      ...fixed.map((slot) => ({ ...slot, itemIndex: slot.item.originalIndex })),
+      ...breaks
+        .filter((slot) => slot.item.originalIndex > breakSlot.item.originalIndex)
+        .map((slot) => ({ ...slot, itemIndex: slot.item.originalIndex })),
+    ];
+    for (const other of otherSlots) {
+      const overlapStart = Math.max(breakSlot.start, other.start);
+      const overlapEnd = Math.min(breakSlot.end, other.end);
+      if (overlapStart < overlapEnd) {
+        conflicts.push({
+          type: "break_overlap",
+          breakItemIndex: breakSlot.item.originalIndex,
+          otherItemIndex: other.itemIndex,
+          overlapStartMinutes: overlapStart,
+          overlapEndMinutes: overlapEnd,
+        });
+      }
+    }
+  }
 
   const importantItems = items.filter(
     (item) =>
       !item.removedFromPlan &&
       !item.isFixed &&
+      item.itemType !== "break" &&
       (item.requiredToday || item.dueCategory === "today"),
   );
   const affectedImportantItems = importantItems.filter(
     (item) => (remainingByItem.get(item.originalIndex) ?? 0) > 0,
   );
   const windowStart = roundUpTo5(Math.max(nowMinutes, 0));
-  const blockedMinutes = occupied.reduce(
+  const blockedMinutes = mergeOccupiedTime(fixed).reduce(
     (total, slot) =>
       total + Math.max(0, Math.min(slot.end, cutoffMinutes) - Math.max(slot.start, windowStart)),
     0,
@@ -365,7 +450,12 @@ export function buildSchedule({ items, order, nowMinutes, cutoffMinutes }: Build
 
   for (const item of items) {
     const remaining = remainingByItem.get(item.originalIndex) ?? 0;
-    if (!item.isFixed && item.dueCategory === "today" && remaining > 0) {
+    if (
+      item.itemType !== "break" &&
+      !item.isFixed &&
+      item.dueCategory === "today" &&
+      remaining > 0
+    ) {
       conflicts.push({
         type: "due_today_unfit",
         itemIndex: item.originalIndex,
@@ -422,6 +512,7 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
       (item) =>
         !item.removedFromPlan &&
         !item.isFixed &&
+        item.itemType !== "break" &&
         item.suggestedDay === "today" &&
         todayDuration(item) > 0,
     )

@@ -373,3 +373,95 @@ describe("required-today planning", () => {
     expect(rebuilt.conflicts.some((conflict) => conflict.type === "fixed_overlap")).toBe(false);
   });
 });
+
+describe("break scheduling", () => {
+  it("keeps an explicit break out of task and fixed-commitment metadata", () => {
+    const items = [
+      task({ originalIndex: 0, durationMinutes: 60 }),
+      task({
+        originalIndex: 1,
+        itemType: "break",
+        title: "Tea break",
+        durationMinutes: 15,
+        reason: "Manual break",
+        fixedStart: "10:30",
+      }),
+    ];
+
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+    const breakEntry = result.schedule.find((entry) => entry.itemIndex === 1);
+
+    expect(breakEntry).toEqual(
+      expect.objectContaining({
+        kind: "break",
+        title: "Tea break",
+        startMinutes: 10 * 60 + 30,
+        endMinutes: 10 * 60 + 45,
+      }),
+    );
+    expect(breakEntry?.priority).toBeUndefined();
+    expect(breakEntry?.isFixed).toBeUndefined();
+    expect(result.tomorrow.some((entry) => entry.itemIndex === 1)).toBe(false);
+    expect(result.conflicts.some((conflict) => conflict.type === "fixed_overlap")).toBe(false);
+  });
+
+  it("recalculates later timestamps when a generated focus break is removed", () => {
+    const items = [task({ durationMinutes: 60, focusBlockMinutes: 30 })];
+    const base = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+    const rebuilt = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+      suppressedBreakIds: ["br-0-1"],
+    });
+
+    expect(base.schedule.find((entry) => entry.id === "t-0-b2")?.startMinutes).toBe(10 * 60 + 35);
+    expect(rebuilt.schedule.find((entry) => entry.id === "t-0-b2")?.startMinutes).toBe(10 * 60 + 30);
+    expect(rebuilt.schedule.some((entry) => entry.id === "br-0-1")).toBe(false);
+  });
+
+  it("emits only one break for a duplicated timestamp slot", () => {
+    const items = [
+      task({
+        originalIndex: 1,
+        itemType: "break",
+        title: "First break",
+        durationMinutes: 15,
+        fixedStart: "10:30",
+      }),
+      task({
+        originalIndex: 2,
+        itemType: "break",
+        title: "Duplicate break",
+        durationMinutes: 15,
+        fixedStart: "10:30",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, []),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+
+    expect(
+      result.schedule.filter(
+        (entry) =>
+          entry.kind === "break" &&
+          entry.startMinutes === 10 * 60 + 30 &&
+          entry.endMinutes === 10 * 60 + 45,
+      ),
+    ).toHaveLength(1);
+  });
+});

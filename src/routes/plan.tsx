@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check, Trash2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
-import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types";
+import type { PlanItem, Priority, ScheduleEntry, SchedulingConflict } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import {
   getRoomMinutesNeeded,
@@ -137,6 +137,14 @@ interface EditForm {
   fixedEnd: string;
 }
 
+interface BreakEditForm {
+  entryId: string;
+  itemIndex: number;
+  title: string;
+  durationMinutes: number;
+  startTime: string;
+}
+
 interface CrowdedProposal {
   itemIndex: number;
   needMin: number;
@@ -180,8 +188,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [addMode, setAddMode] = useState<null | "task" | "break">(null);
   const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
   const [splitMinutes, setSplitMinutes] = useState<Record<number, number>>({});
-  const [addBreakForm, setAddBreakForm] = useState<{ durationMinutes: number; startTime: string }>({ durationMinutes: 15, startTime: "12:00" });
-  const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string } | null>(null);
+  const [addBreakForm, setAddBreakForm] = useState<{ title: string; durationMinutes: number; startTime: string }>({ title: "Break", durationMinutes: 15, startTime: "12:00" });
+  const [editingBreak, setEditingBreak] = useState<BreakEditForm | null>(null);
+  const [openBreakActions, setOpenBreakActions] = useState<string | null>(null);
+  const [suppressedBreakIds, setSuppressedBreakIds] = useState<string[]>([]);
+  const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string; suppressedBreakIds: string[] } | null>(null);
   const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
   const [undoIdx, setUndoIdx] = useState<number | null>(null);
   const undoTimerRef = useRef<number | null>(null);
@@ -265,14 +276,24 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           completedTasks?: number[];
           usedFallback?: boolean;
           planNowMinutes?: number | null;
+          suppressedBreakIds?: string[];
         };
-        if (Array.isArray(parsed.items) && parsed.items.length > 0) setItems(parsed.items);
+        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+          setItems(
+            parsed.items.map((item) =>
+              item.reason === "Manual break" && item.itemType !== "break"
+                ? { ...item, itemType: "break", isFixed: false, breakLocked: false }
+                : item,
+            ),
+          );
+        }
         if (Array.isArray(parsed.userOrder)) setUserOrder(parsed.userOrder);
         if (typeof parsed.availableUntil === "string") setAvailableUntil(parsed.availableUntil);
         if (Array.isArray(parsed.completedTasks)) setCompletedTasks(new Set(parsed.completedTasks));
         if (typeof parsed.raw === "string") setRaw(parsed.raw);
         if (typeof parsed.usedFallback === "boolean") setUsedFallback(parsed.usedFallback);
         if (typeof parsed.planNowMinutes === "number") setPlanNowMinutes(parsed.planNowMinutes);
+        if (Array.isArray(parsed.suppressedBreakIds)) setSuppressedBreakIds(parsed.suppressedBreakIds);
       }
     } catch { /* ignore */ }
     hydratedRef.current = true;
@@ -293,10 +314,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           completedTasks: Array.from(completedTasks),
           usedFallback,
           planNowMinutes,
+          suppressedBreakIds,
         }),
       );
     } catch { /* ignore */ }
-  }, [items, userOrder, availableUntil, completedTasks, raw, usedFallback, planNowMinutes]);
+  }, [items, userOrder, availableUntil, completedTasks, raw, usedFallback, planNowMinutes, suppressedBreakIds]);
 
   const startNewPlan = useCallback(() => {
     setItems(null);
@@ -313,6 +335,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setError(null);
     setShowConflictModal(false);
     setFullDayFlow(null);
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    setSuppressedBreakIds([]);
     presentedConflictKeyRef.current = "";
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     try { localStorage.removeItem(PLAN_STORAGE_KEY); } catch { /* ignore */ }
@@ -334,8 +359,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
   const { schedule, tomorrow, conflicts, scheduledMinutes } = useMemo(() => {
     if (!items) return { schedule: [], tomorrow: [], conflicts: [], scheduledMinutes: 0 };
-    return buildSchedule({ items, order, nowMinutes, cutoffMinutes });
-  }, [items, order, nowMinutes, cutoffMinutes]);
+    return buildSchedule({ items, order, nowMinutes, cutoffMinutes, suppressedBreakIds });
+  }, [items, order, nowMinutes, cutoffMinutes, suppressedBreakIds]);
 
   const roomContext = useMemo(
     () =>
@@ -372,7 +397,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   }, [conflicts.length, confirmNewPlan, crowded, fullDayFlow, items, loading, showGuestCard]);
 
   const pushHistory = () => {
-    if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil };
+    if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil, suppressedBreakIds: [...suppressedBreakIds] };
   };
 
   const flashStatus = (msg: string) => {
@@ -732,6 +757,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setItems(historyRef.current.items);
     setUserOrder(historyRef.current.order);
     setAvailableUntil(historyRef.current.availableUntil);
+    setSuppressedBreakIds(historyRef.current.suppressedBreakIds);
     historyRef.current = null;
     setCrowded(null);
     flashStatus("Restored the previous plan.");
@@ -750,7 +776,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const start = Math.min(cutoffMinutes - 5, Math.ceil(Math.max(lastEnd, nowMinutes) / 5) * 5);
     const h = Math.floor(start / 60);
     const m = start % 60;
-    setAddBreakForm({ durationMinutes: 15, startTime: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` });
+    setAddBreakForm({ title: "Break", durationMinutes: 15, startTime: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` });
     setAddMode("break");
   };
 
@@ -867,14 +893,16 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     const duration = Math.max(5, Math.round(addBreakForm.durationMinutes / 5) * 5);
     const [sh, sm] = addBreakForm.startTime.split(":").map((n) => parseInt(n, 10));
     const startMin = sh * 60 + (sm || 0);
-    const endMin = Math.min(cutoffMinutes, startMin + duration);
-    const eh = Math.floor(endMin / 60);
-    const em = endMin % 60;
-    pushHistory();
+    const endMin = startMin + duration;
+    if (startMin < nowMinutes || endMin > cutoffMinutes) {
+      flashStatus("Choose a break time inside today’s remaining planning window.");
+      return;
+    }
     const idx = nextIndex();
     const newItem: PlanItem = {
       originalIndex: idx,
-      title: "Break",
+      itemType: "break",
+      title: addBreakForm.title.trim() || "Break",
       durationMinutes: endMin - startMin,
       priority: "low",
       requiredToday: false,
@@ -883,24 +911,176 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       dueLabel: null,
       dueCategory: "none",
       suggestedDay: "today",
-      isFixed: true,
+      isFixed: false,
       fixedStart: addBreakForm.startTime,
-      fixedEnd: `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`,
+      fixedEnd: null,
       focusBlockMinutes: null,
       note: null,
+      breakLocked: false,
     };
+    const duplicate = schedule.some(
+      (entry) =>
+        entry.kind === "break" &&
+        entry.startMinutes === startMin,
+    );
+    if (duplicate) {
+      flashStatus("A break already exists at that time.");
+      return;
+    }
+    pushHistory();
+    presentedConflictKeyRef.current = "";
     setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
     setAddMode(null);
     flashStatus("Break added.");
+  };
+
+  const timeValue = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+  const beginBreakEdit = (entry: ScheduleEntry) => {
+    setEditingBreak({
+      entryId: entry.id,
+      itemIndex: entry.itemIndex,
+      title: entry.title,
+      durationMinutes: entry.endMinutes - entry.startMinutes,
+      startTime: timeValue(entry.startMinutes),
+    });
+    setOpenBreakActions(entry.id);
+  };
+
+  const saveBreakEdit = () => {
+    if (!editingBreak) return;
+    const duration = Math.max(5, Math.round(editingBreak.durationMinutes / 5) * 5);
+    const startMinutes = hhmmToMinutes(editingBreak.startTime);
+    if (startMinutes + duration > cutoffMinutes) {
+      flashStatus("That break would end after your available-until time.");
+      return;
+    }
+    pushHistory();
+    presentedConflictKeyRef.current = "";
+    const title = editingBreak.title.trim() || "Break";
+    if (editingBreak.itemIndex >= 0) {
+      updateItems((prev) =>
+        prev.map((item) =>
+          item.originalIndex === editingBreak.itemIndex
+            ? {
+                ...item,
+                itemType: "break",
+                title,
+                durationMinutes: duration,
+                isFixed: false,
+                fixedStart: editingBreak.startTime,
+                fixedEnd: null,
+              }
+            : item,
+        ),
+      );
+    } else {
+      const idx = nextIndex();
+      setSuppressedBreakIds((current) =>
+        current.includes(editingBreak.entryId) ? current : [...current, editingBreak.entryId],
+      );
+      const newBreak: PlanItem = {
+        originalIndex: idx,
+        itemType: "break",
+        title,
+        durationMinutes: duration,
+        priority: "low",
+        requiredToday: false,
+        reason: "Edited generated break",
+        dueDate: null,
+        dueLabel: null,
+        dueCategory: "none",
+        suggestedDay: "today",
+        isFixed: false,
+        fixedStart: editingBreak.startTime,
+        fixedEnd: null,
+        focusBlockMinutes: null,
+        note: null,
+        breakLocked: false,
+      };
+      setItems((current) => (current ? [...current, newBreak] : [newBreak]));
+    }
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    flashStatus("Break updated and the timeline was rebuilt.");
+  };
+
+  const deleteBreak = (entry: ScheduleEntry) => {
+    pushHistory();
+    if (entry.itemIndex >= 0) {
+      updateItems((prev) => prev.filter((item) => item.originalIndex !== entry.itemIndex));
+    } else {
+      setSuppressedBreakIds((current) =>
+        current.includes(entry.id) ? current : [...current, entry.id],
+      );
+    }
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    flashStatus("Break removed and the timeline was rebuilt.");
+  };
+
+  const relocateBreak = (entry: ScheduleEntry, requestedStart: number) => {
+    const duration = entry.endMinutes - entry.startMinutes;
+    const start = Math.max(nowMinutes, Math.min(requestedStart, cutoffMinutes - duration));
+    const startTime = timeValue(Math.ceil(start / 5) * 5);
+    pushHistory();
+    presentedConflictKeyRef.current = "";
+    if (entry.itemIndex >= 0) {
+      updateItems((prev) =>
+        prev.map((item) =>
+          item.originalIndex === entry.itemIndex
+            ? { ...item, itemType: "break", isFixed: false, fixedStart: startTime, fixedEnd: null }
+            : item,
+        ),
+      );
+    } else {
+      const idx = nextIndex();
+      setSuppressedBreakIds((current) =>
+        current.includes(entry.id) ? current : [...current, entry.id],
+      );
+      setItems((current) => [
+        ...(current ?? []),
+        {
+          originalIndex: idx,
+          itemType: "break",
+          title: entry.title,
+          durationMinutes: duration,
+          priority: "low",
+          requiredToday: false,
+          reason: "Moved generated break",
+          dueDate: null,
+          dueLabel: null,
+          dueCategory: "none",
+          suggestedDay: "today",
+          isFixed: false,
+          fixedStart: startTime,
+          fixedEnd: null,
+          focusBlockMinutes: null,
+          note: null,
+          breakLocked: false,
+        },
+      ]);
+    }
+    setOpenBreakActions(null);
+    flashStatus("Break moved and the timeline was rebuilt.");
   };
 
 
 
   // Drag-and-drop for flexible today tasks
   const dragIdxRef = useRef<number | null>(null);
+  const dragBreakRef = useRef<ScheduleEntry | null>(null);
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
+    dragBreakRef.current = null;
     dragIdxRef.current = idx;
     e.dataTransfer.effectAllowed = "move";
+  };
+  const onBreakDragStart = (entry: ScheduleEntry) => (e: React.DragEvent) => {
+    dragIdxRef.current = null;
+    dragBreakRef.current = entry;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", entry.id);
   };
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -908,6 +1088,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
   const onDrop = (targetIdx: number) => (e: React.DragEvent) => {
     e.preventDefault();
+    if (dragBreakRef.current) {
+      const target = schedule.find((entry) => entry.itemIndex === targetIdx);
+      if (target) relocateBreak(dragBreakRef.current, target.startMinutes);
+      dragBreakRef.current = null;
+      return;
+    }
     const src = dragIdxRef.current;
     dragIdxRef.current = null;
     if (src === null || src === targetIdx) return;
@@ -920,10 +1106,17 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setUserOrder(cur);
     flashStatus("Your order was kept and the timeline was rebuilt.");
   };
+  const onDropAtEntry = (target: ScheduleEntry) => (event: React.DragEvent) => {
+    if (!dragBreakRef.current) return;
+    event.preventDefault();
+    const source = dragBreakRef.current;
+    dragBreakRef.current = null;
+    if (source.id !== target.id) relocateBreak(source, target.startMinutes);
+  };
 
   // Group schedule entries by task to render blocks together
   const scheduleWithMeta = schedule.map((s) => {
-    if (s.kind === "task") {
+    if (s.kind === "task" || s.kind === "break") {
       const item = items?.find((i) => i.originalIndex === s.itemIndex);
       return { entry: s, item };
     }
@@ -938,6 +1131,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const overlapConflicts = conflicts.filter(
     (conflict): conflict is Extract<SchedulingConflict, { type: "fixed_overlap" }> =>
       conflict.type === "fixed_overlap",
+  );
+  const breakConflicts = conflicts.filter(
+    (conflict): conflict is Extract<SchedulingConflict, { type: "break_overlap" }> =>
+      conflict.type === "break_overlap",
   );
   const dueTodayConflicts = conflicts.filter(
     (conflict): conflict is Extract<SchedulingConflict, { type: "due_today_unfit" }> =>
@@ -977,7 +1174,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (!items) return { affectedRows: [], totalUnfit: 0 };
     const affectedMap = new Map<number, { title: string; minutes: number }>();
     for (const conflict of conflicts) {
-      if (conflict.type === "fixed_overlap") continue;
+      if (conflict.type === "fixed_overlap" || conflict.type === "break_overlap") continue;
       if (conflict.type === "due_today_unfit" || conflict.type === "task_overflow") {
         const item = items.find((i) => i.originalIndex === conflict.itemIndex);
         if (item) affectedMap.set(item.originalIndex, { title: item.title, minutes: conflict.remainingMinutes });
@@ -1006,6 +1203,49 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setShowConflictModal(false);
     startEdit(itemIndex);
     scrollToItem(itemIndex);
+  };
+
+  const resolveBreakConflict = (action: "move" | "shorten" | "remove") => {
+    const conflict = breakConflicts[0];
+    if (!conflict || !items) return;
+    const breakItem = items.find((item) => item.originalIndex === conflict.breakItemIndex);
+    if (!breakItem?.fixedStart) return;
+    const shortenTo =
+      action === "shorten"
+        ? conflict.overlapStartMinutes - hhmmToMinutes(breakItem.fixedStart)
+        : null;
+    if (shortenTo !== null && shortenTo < 5) {
+      flashStatus("There is not enough room there to shorten this break.");
+      return;
+    }
+    pushHistory();
+    if (action === "remove") {
+      setItems(items.filter((item) => item.originalIndex !== breakItem.originalIndex));
+    } else if (action === "shorten") {
+      setItems(
+        items.map((item) =>
+          item.originalIndex === breakItem.originalIndex
+            ? { ...item, durationMinutes: Math.floor((shortenTo ?? 5) / 5) * 5 }
+            : item,
+        ),
+      );
+    } else {
+      const other = schedule.find((entry) => entry.itemIndex === conflict.otherItemIndex);
+      const duration = breakItem.durationMinutes;
+      const after = other ? other.endMinutes : conflict.overlapEndMinutes;
+      const before = (other ? other.startMinutes : conflict.overlapStartMinutes) - duration;
+      const nextStart = after + duration <= cutoffMinutes ? after : Math.max(nowMinutes, before);
+      setItems(
+        items.map((item) =>
+          item.originalIndex === breakItem.originalIndex
+            ? { ...item, fixedStart: timeValue(Math.ceil(nextStart / 5) * 5) }
+            : item,
+        ),
+      );
+    }
+    setShowConflictModal(false);
+    presentedConflictKeyRef.current = "";
+    flashStatus(`Break ${action === "remove" ? "removed" : action === "move" ? "moved" : "shortened"} and the timeline was rebuilt.`);
   };
 
   const focusStopTime = () => {
@@ -1164,6 +1404,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {conflicts.length > 0 && (
                 <div id="conflict-banner" className="mt-3 flex items-center justify-between gap-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">
                   <div className="min-w-0 flex-1">
+                    {breakConflicts.length > 0 && (
+                      <span>{breakConflicts.length} break conflict{breakConflicts.length === 1 ? "" : "s"} need attention. </span>
+                    )}
                     {overlapConflicts.length > 0 && (
                       <span>{overlapConflicts.length} unresolved fixed-time overlap{overlapConflicts.length === 1 ? "" : "s"}. </span>
                     )}
@@ -1177,7 +1420,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <span>{formatDuration(overflowRemaining)} of planned work still needs time.</span>
                     )}
                   </div>
-                  {overlapConflicts.length > 0 && (
+                  {(breakConflicts.length > 0 || overlapConflicts.length > 0) && (
                     <button
                       type="button"
                       onClick={() => setShowConflictModal(true)}
@@ -1199,23 +1442,56 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <ol className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }) => {
                     if (entry.kind === "break") {
+                      const isBreakEditing = editingBreak?.entryId === entry.id;
+                      const actionsOpen = openBreakActions === entry.id;
                       return (
-                        <li key={entry.id} className="rounded-xl border border-border/60 bg-secondary/40 px-4 py-3">
-                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
-                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-background/70 text-primary">
-                              <Coffee className="h-5 w-5" strokeWidth={1.5} />
+                        <li
+                          key={entry.id}
+                          draggable={!isBreakEditing}
+                          onDragStart={onBreakDragStart(entry)}
+                          onDragOver={onDragOver}
+                          onDrop={onDropAtEntry(entry)}
+                          onClick={() => setOpenBreakActions((current) => current === entry.id ? null : entry.id)}
+                          className="group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4"
+                        >
+                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                            <div className="flex items-center gap-1 text-primary">
+                              <GripVertical className="h-4 w-4 cursor-grab opacity-50 group-hover:opacity-80 group-focus-within:opacity-80" aria-hidden="true" />
+                              <Coffee className="h-4 w-4" strokeWidth={1.5} />
                             </div>
-                            <div className="flex min-w-0 items-center gap-3 text-sm">
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                               <span className="font-medium text-muted-foreground tabular-nums">
                                 {minutesToTimeLabel(entry.startMinutes)}–{minutesToTimeLabel(entry.endMinutes)}
                               </span>
-                              <span className="text-muted-foreground">Short break</span>
+                              <span className="truncate text-muted-foreground">{entry.title}</span>
+                              {entry.isLockedBreak && <FixedPill />}
                             </div>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-0.5 text-xs text-priority-low-fg">
-                              <Leaf className="h-3 w-3" strokeWidth={1.7} />
-                              {formatDuration(entry.endMinutes - entry.startMinutes)}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="mr-1 text-xs tabular-nums text-priority-low-fg">{formatDuration(entry.endMinutes - entry.startMinutes)}</span>
+                              <div className={`flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ${actionsOpen ? "opacity-100" : "max-sm:opacity-0"}`}>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); beginBreakEdit(entry); }} aria-label={`Edit ${entry.title}`} className="rounded-md p-1.5 text-muted-foreground hover:bg-background/80 hover:text-foreground">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button type="button" onClick={(event) => { event.stopPropagation(); deleteBreak(entry); }} aria-label={`Delete ${entry.title}`} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
+                          {isBreakEditing && editingBreak && (
+                            <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]" onClick={(event) => event.stopPropagation()}>
+                              <input value={editingBreak.title} onChange={(event) => setEditingBreak({ ...editingBreak, title: event.target.value })} aria-label="Break name" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
+                              <input type="time" value={editingBreak.startTime} onChange={(event) => setEditingBreak({ ...editingBreak, startTime: event.target.value })} aria-label="Break start time" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
+                              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <input type="number" min={5} step={5} value={editingBreak.durationMinutes} onChange={(event) => setEditingBreak({ ...editingBreak, durationMinutes: parseInt(event.target.value, 10) || 5 })} aria-label="Break duration in minutes" className="w-16 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground" />
+                                min
+                              </label>
+                              <div className="flex items-center justify-end gap-1">
+                                <button type="button" onClick={() => setEditingBreak(null)} className="rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-background">Cancel</button>
+                                <button type="button" onClick={saveBreakEdit} className="rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground">Save</button>
+                              </div>
+                            </div>
+                          )}
                         </li>
                       );
                     }
@@ -1227,8 +1503,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         key={entry.id}
                         draggable={isFlexible && !isEditing}
                         onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
-                        onDragOver={isFlexible ? onDragOver : undefined}
-                        onDrop={isFlexible && item ? onDrop(item.originalIndex) : undefined}
+                        onDragOver={onDragOver}
+                        onDrop={item ? onDrop(item.originalIndex) : onDropAtEntry(entry)}
                         className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
                       >
                         <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
@@ -1491,6 +1767,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         <X className="h-4 w-4" />
                       </button>
                     </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Break name</label>
+                      <input
+                        value={addBreakForm.title}
+                        onChange={(event) => setAddBreakForm({ ...addBreakForm, title: event.target.value })}
+                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      />
+                    </div>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <div className="flex-1">
                         <label className="block text-xs font-medium text-muted-foreground mb-1">Start at</label>
@@ -1689,6 +1973,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         const manualTasks = items.filter(
           (item) =>
             item.originalIndex !== newTask.originalIndex &&
+            item.itemType !== "break" &&
             item.suggestedDay === "today" &&
             !item.isFixed &&
             schedule.some((entry) => entry.itemIndex === item.originalIndex),
@@ -2111,7 +2396,36 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         );
       })()}
 
-      {showConflictModal && conflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
+      {showConflictModal && breakConflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (() => {
+        const conflict = breakConflicts[0];
+        const breakItem = items.find((item) => item.originalIndex === conflict.breakItemIndex);
+        const otherItem = items.find((item) => item.originalIndex === conflict.otherItemIndex);
+        const canShorten = !!breakItem?.fixedStart && conflict.overlapStartMinutes - hhmmToMinutes(breakItem.fixedStart) >= 5;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="break-conflict-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 id="break-conflict-title" className="font-serif text-2xl text-foreground">This break overlaps another block</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">{breakItem?.title ?? "Break"}</span> overlaps {otherItem?.title ?? "another block"} from {minutesToTimeLabel(conflict.overlapStartMinutes)}–{minutesToTimeLabel(conflict.overlapEndMinutes)}.
+                  </p>
+                </div>
+                <button type="button" onClick={() => setShowConflictModal(false)} aria-label="Close break conflict" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={() => resolveBreakConflict("move")} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">Move break</button>
+                <button type="button" disabled={!canShorten} onClick={() => resolveBreakConflict("shorten")} className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40">Shorten break</button>
+                <button type="button" onClick={() => resolveBreakConflict("remove")} className="rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10">Remove break</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {showConflictModal && breakConflicts.length === 0 && conflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
           <div role="dialog" aria-modal="true" aria-labelledby="conflict-modal-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
             <div className="flex items-start justify-between gap-4">

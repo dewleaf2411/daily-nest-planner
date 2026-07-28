@@ -4,6 +4,8 @@ export type SuggestedDay = "today" | "tomorrow";
 
 export interface PlanItem {
   originalIndex: number;
+  /** Breaks are timeline controls, not tasks. Missing means a normal task for saved-plan compatibility. */
+  itemType?: "task" | "break";
   title: string;
   durationMinutes: number;
   priority: Priority;
@@ -27,6 +29,8 @@ export interface PlanItem {
   todayDurationMinutes?: number;
   /** Work still remaining after Today's planned block; the task and due date stay unchanged. */
   remainingDurationMinutes?: number;
+  /** Only true when the user deliberately locks a break to its chosen time. */
+  breakLocked?: boolean;
 }
 
 export type ScheduleEntryKind = "task" | "break" | "fixed";
@@ -46,6 +50,7 @@ export interface ScheduleEntry {
   priority?: Priority;
   dueLabel?: string | null;
   isFixed?: boolean;
+  isLockedBreak?: boolean;
 }
 
 export interface TomorrowEntry {
@@ -88,4 +93,11 @@ export type SchedulingConflict =
       type: "task_overflow";
       itemIndex: number;
       remainingMinutes: number;
+    }
+  | {
+      type: "break_overlap";
+      breakItemIndex: number;
+      otherItemIndex: number;
+      overlapStartMinutes: number;
+      overlapEndMinutes: number;
     };
