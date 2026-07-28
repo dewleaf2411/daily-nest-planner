@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Leaf, ArrowLeft, Plus, Trash2, Pencil, Check, X, Loader2, Calendar, Shield, LogOut, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
+import { setCommitmentOccurrenceEnabled } from "@/lib/commitments";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsRoute,
@@ -397,10 +398,57 @@ function CommitmentsSection({
     flash("Saved.");
   };
 
-  const toggleEnabled = async (c: Commitment) => {
+  const toggleEnabled = async (c: Commitment, day: number) => {
     const next = !c.enabled;
-    setCommitments((prev) => prev.map((x) => (x.id === c.id ? { ...x, enabled: next } : x)));
-    await supabase.from("fixed_commitments").update({ enabled: next }).eq("id", c.id);
+    if (c.days_of_week.length === 1) {
+      const { error } = await supabase.from("fixed_commitments").update({ enabled: next }).eq("id", c.id);
+      if (error) {
+        flash("Couldn't update this commitment.");
+        return;
+      }
+      setCommitments((prev) =>
+        setCommitmentOccurrenceEnabled(prev, c.id, day, next, { ...c, enabled: next }),
+      );
+      return;
+    }
+
+    const remainingDays = c.days_of_week.filter((weekday) => weekday !== day);
+    const { data, error: insertError } = await supabase
+      .from("fixed_commitments")
+      .insert({
+        user_id: userId,
+        name: c.name,
+        days_of_week: [day],
+        start_time: c.start_time,
+        end_time: c.end_time,
+        enabled: next,
+      })
+      .select()
+      .single();
+    if (insertError || !data) {
+      flash("Couldn't update this commitment.");
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from("fixed_commitments")
+      .update({ days_of_week: remainingDays })
+      .eq("id", c.id);
+    if (updateError) {
+      await supabase.from("fixed_commitments").delete().eq("id", data.id);
+      flash("Couldn't update this commitment.");
+      return;
+    }
+
+    setCommitments((prev) =>
+      setCommitmentOccurrenceEnabled(
+        prev,
+        c.id,
+        day,
+        next,
+        data as unknown as Commitment,
+      ),
+    );
   };
 
   const removeAll = async (id: string) => {
@@ -459,14 +507,14 @@ function CommitmentsSection({
                           {!c.enabled && " · Disabled"}
                         </p>
                       </div>
-                      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                      <label className="inline-flex items-center text-xs text-muted-foreground cursor-pointer">
                         <input
                           type="checkbox"
                           checked={c.enabled}
-                          onChange={() => toggleEnabled(c)}
+                          onChange={() => toggleEnabled(c, d)}
+                          aria-label={`${c.enabled ? "Disable" : "Enable"} ${c.name} on ${DAY_LONG[d]}`}
                           className="h-3.5 w-3.5 accent-primary"
                         />
-                        On
                       </label>
                       <button
                         onClick={() => beginEdit(c)}
