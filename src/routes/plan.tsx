@@ -6,7 +6,6 @@ import { planTasks } from "@/lib/planner.functions";
 import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
 import {
-  buildRoomSuggestions,
   getRoomMinutesNeeded,
   previewRoomAdjustment,
   previewRoomAdjustments,
@@ -341,10 +340,6 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         ? { items, order, newTaskIndex: fullDayFlow.taskIndex, nowMinutes, cutoffMinutes }
         : null,
     [cutoffMinutes, fullDayFlow, items, nowMinutes, order],
-  );
-  const roomSuggestions = useMemo(
-    () => (roomContext ? buildRoomSuggestions(roomContext) : []),
-    [roomContext],
   );
   const roomPreview = useMemo(
     () =>
@@ -1698,7 +1693,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         Make room for “{newTask.title}”
                       </h3>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        Choose a small adjustment. Your due dates will stay the same.
+                        Choose how to make room.
                       </p>
                     </div>
                     <button
@@ -1710,37 +1705,38 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-4 space-y-2">
-                    {roomSuggestions.map((suggestion) => (
-                      <button
-                        key={suggestion.id}
-                        type="button"
-                        onClick={() => selectRoomAdjustment(suggestion.adjustment, "suggestions")}
-                        className="w-full rounded-2xl border border-border bg-background p-3 text-left hover:bg-accent/60"
-                      >
-                        <span className="block text-sm font-medium text-foreground">{suggestion.title}</span>
-                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                          {suggestion.detail}
-                        </span>
-                      </button>
-                    ))}
-                    {roomSuggestions.length === 0 && (
-                      <p className="rounded-2xl bg-secondary/50 p-3 text-sm leading-relaxed text-muted-foreground">
-                        No obvious task to move. Choose one yourself.
-                      </p>
-                    )}
+                  <div className="mt-8 space-y-3">
+                    {exactMinutesNeeded > 0 &&
+                      cutoffMinutes + exactMinutesNeeded <= 23 * 60 + 59 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            selectRoomAdjustment(
+                              { kind: "extend", minutes: exactMinutesNeeded },
+                              "suggestions",
+                            )
+                          }
+                          className="w-full rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent/60"
+                        >
+                          <span className="block text-sm font-medium text-foreground">
+                            Extend today by {exactMinutesNeeded} min
+                          </span>
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFullDayFlow((current) =>
+                          current ? { ...current, stage: "choose", message: null } : current,
+                        )
+                      }
+                      className="w-full rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent/60"
+                    >
+                      <span className="block text-sm font-medium text-foreground">
+                        Choose a task to adjust
+                      </span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFullDayFlow((current) =>
-                        current ? { ...current, stage: "choose", message: null } : current,
-                      )
-                    }
-                    className="mt-4 text-sm font-medium text-primary underline-offset-4 hover:underline"
-                  >
-                    Choose myself
-                  </button>
                 </>
               )}
 
