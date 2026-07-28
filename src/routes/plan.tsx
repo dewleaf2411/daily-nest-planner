@@ -1804,86 +1804,44 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     ))}
                   </div>
                   {selectedManualTask && (
-                    <div className="mt-4 space-y-2 border-t border-border pt-4">
-                      <p className="text-sm font-medium text-foreground">
-                        {selectedManualTask.title} · {formatDuration(selectedManualMinutes)}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            selectRoomAdjustment(
-                              { kind: "move", targetIndex: selectedManualTask.originalIndex },
-                              "choose",
-                            )
-                          }
-                          className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
-                        >
-                          Move all to tomorrow
-                        </button>
-                      </div>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        Move this entire work block without changing its due date.
-                      </p>
-                      <div className="rounded-xl border border-border bg-background p-3">
-                        <label className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
-                          <span>Keep {selectedManualTask.title} for</span>
-                          <span className="inline-flex items-center gap-2">
-                            <input
-                              type="number"
-                              min={1}
-                              max={Math.max(1, selectedManualMinutes - 1)}
-                              step={1}
-                              value={fullDayFlow.manualKeepMinutes}
-                              onChange={(event) => {
-                                const nextValue = Number(event.target.value);
-                                setFullDayFlow((current) =>
-                                  current
-                                    ? {
-                                        ...current,
-                                        manualKeepMinutes: Number.isFinite(nextValue)
-                                          ? nextValue
-                                          : 0,
-                                        message: null,
-                                      }
-                                    : current,
-                                );
-                              }}
-                              className="w-14 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
-                            />
-                            min today
-                          </span>
-                        </label>
+                    <div className="mt-4 border-t border-border pt-4">
+                      <div className="rounded-xl border border-border bg-background p-4">
+                        <p className="text-sm font-medium text-foreground">
+                          {selectedManualTask.title}
+                        </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-foreground">
+                          <input
+                            type="number"
+                            min={1}
+                            max={Math.max(1, selectedManualMinutes - 1)}
+                            step={1}
+                            value={fullDayFlow.manualKeepMinutes}
+                            onChange={(event) => {
+                              const nextValue = Number(event.target.value);
+                              setFullDayFlow((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      manualKeepMinutes: Number.isFinite(nextValue)
+                                        ? nextValue
+                                        : 0,
+                                      message: null,
+                                    }
+                                  : current,
+                              );
+                            }}
+                            className="w-14 rounded-md border border-border bg-card px-2 py-1 text-right text-sm"
+                          />
+                          <span>min today</span>
+                        </div>
                         {manualKeepIsValid ? (
                           <>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {formatDuration(manualMinutesFreed)} will move to tomorrow.
+                            <p className="mt-2 text-sm text-muted-foreground">
+                              {formatDuration(manualMinutesFreed)} tomorrow
                             </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {newTask.title} will be added today for{" "}
-                              {formatDuration(newTask.durationMinutes)}.
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {newTask.title}: {formatDuration(newTask.durationMinutes)} today
                             </p>
-                            <dl className="mt-3 space-y-1.5 border-t border-border pt-3 text-xs">
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="text-muted-foreground">Task</dt>
-                                <dd className="truncate text-right text-foreground">
-                                  {selectedManualTask.title}
-                                </dd>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="text-muted-foreground">Scheduled today</dt>
-                                <dd className="text-right text-foreground">
-                                  {formatDuration(selectedManualMinutes)} →{" "}
-                                  {formatDuration(fullDayFlow.manualKeepMinutes)}
-                                </dd>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <dt className="text-muted-foreground">Moving to tomorrow</dt>
-                                <dd className="text-right text-foreground">
-                                  {formatDuration(manualMinutesFreed)}
-                                </dd>
-                              </div>
-                            </dl>
                           </>
                         ) : (
                           <p className="mt-2 text-xs text-destructive">
@@ -1892,7 +1850,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           </p>
                         )}
                         {manualKeepIsValid && manualMinutesStillNeeded > 0 && (
-                          <p className="mt-3 text-xs text-destructive">
+                          <p className="mt-2 text-xs text-destructive">
                             Create {formatDuration(manualMinutesStillNeeded)} more room to add{" "}
                             {newTask.title} today.
                           </p>
@@ -1905,7 +1863,45 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         >
                           Update my plan
                         </button>
+                        {manualKeepIsValid && (
+                          <details className="mt-3 group">
+                            <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
+                              Details <span className="inline-block transition-transform group-open:rotate-180">▾</span>
+                            </summary>
+                            <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                              <div className="flex justify-between gap-3">
+                                <dt>Original block</dt>
+                                <dd className="text-foreground">{formatDuration(selectedManualMinutes)}</dd>
+                              </div>
+                              <div className="flex justify-between gap-3">
+                                <dt>Keeping today ({selectedManualTask.title})</dt>
+                                <dd className="text-foreground">{formatDuration(fullDayFlow.manualKeepMinutes)}</dd>
+                              </div>
+                              <div className="flex justify-between gap-3">
+                                <dt>Continuing tomorrow ({selectedManualTask.title})</dt>
+                                <dd className="text-foreground">{formatDuration(manualMinutesFreed)}</dd>
+                              </div>
+                              <div className="flex justify-between gap-3">
+                                <dt>{newTask.title} today</dt>
+                                <dd className="text-foreground">{formatDuration(newTask.durationMinutes)}</dd>
+                              </div>
+                              <p className="pt-1">Due date stays the same.</p>
+                            </dl>
+                          </details>
+                        )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectRoomAdjustment(
+                            { kind: "move", targetIndex: selectedManualTask.originalIndex },
+                            "choose",
+                          )
+                        }
+                        className="mt-3 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        Move entire task to tomorrow
+                      </button>
                     </div>
                   )}
                   {manualTasks.length === 0 && (
