@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check } from "lucide-react";
+import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check, Trash2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
 import type { PlanItem, Priority, SchedulingConflict } from "@/lib/planner.types";
 import { buildSchedule, computeOrder, formatDuration, minutesToTimeLabel } from "@/lib/scheduler";
@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ProfileMenu } from "@/components/ProfileMenu";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
 import { lovable } from "@/integrations/lovable/index";
+import { deleteTaskFromPlanState } from "@/lib/task-delete";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
@@ -170,6 +171,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [userOrder, setUserOrder] = useState<number[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [deleteTaskTarget, setDeleteTaskTarget] = useState<{ itemIndex: number; title: string } | null>(null);
   const [crowded, setCrowded] = useState<CrowdedProposal | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [planNowMinutes, setPlanNowMinutes] = useState<number | null>(null);
@@ -305,6 +307,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setPlanNowMinutes(null);
     setEditingIdx(null);
     setEditForm(null);
+    setDeleteTaskTarget(null);
     setUndoIdx(null);
     setStatus(null);
     setError(null);
@@ -542,6 +545,41 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     flashStatus("Your changes were saved and the timeline was rebuilt.");
   };
 
+  const requestDeleteTask = (idx: number) => {
+    const item = items?.find((candidate) => candidate.originalIndex === idx);
+    if (!item || item.isFixed) return;
+    setDeleteTaskTarget({ itemIndex: idx, title: item.title });
+  };
+
+  const confirmDeleteTask = () => {
+    if (!items || !deleteTaskTarget) return;
+    const next = deleteTaskFromPlanState(
+      {
+        items,
+        userOrder,
+        completedTasks,
+        splitMinutes,
+      },
+      deleteTaskTarget.itemIndex,
+    );
+    setItems(next.items);
+    setUserOrder(next.userOrder);
+    setCompletedTasks(next.completedTasks);
+    setSplitMinutes(next.splitMinutes);
+    setEditingIdx(null);
+    setEditForm(null);
+    setDeleteTaskTarget(null);
+    setCrowded(null);
+    setFullDayFlow(null);
+    setUndoIdx((current) =>
+      current !== null && !next.items.some((item) => item.originalIndex === current)
+        ? null
+        : current,
+    );
+    historyRef.current = null;
+    flashStatus("Task deleted");
+  };
+
   const moveOrder = (idx: number, dir: -1 | 1) => {
     const cur = [...order];
     const at = cur.indexOf(idx);
@@ -646,9 +684,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         if (x.originalIndex === crowded.itemIndex) return { ...x, suggestedDay: "today" as const, deferredByUser: false };
         return x;
       });
-      const spillover: PlanItem = {
+      const spillover: PlanItem & { parentTaskIndex: number } = {
         ...src,
         originalIndex: newIdx,
+        parentTaskIndex: src.parentTaskIndex ?? src.originalIndex,
         durationMinutes: rounded,
         suggestedDay: "tomorrow" as const,
         isFixed: false,
@@ -1333,6 +1372,17 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                     </button>
                                   </div>
                                 </div>
+                                {!item.isFixed && (
+                                  <div className="border-t border-border/70 pt-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => requestDeleteTask(item.originalIndex)}
+                                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" /> Delete task
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1546,6 +1596,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                       Save
                                     </button>
                                   </div>
+                                  <div className="border-t border-border/70 pt-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => requestDeleteTask(item.originalIndex)}
+                                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" /> Delete task
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1584,6 +1643,45 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
             : "We'll build a plan that feels doable and kind to you."}
         </p>
       </div>
+
+      {deleteTaskTarget && (
+        <div
+          className="fixed inset-0 z-[70] grid place-items-center bg-foreground/20 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDeleteTaskTarget(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-task-title"
+            className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg"
+          >
+            <h2 id="delete-task-title" className="text-base font-semibold text-foreground">
+              Delete this task?
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              &lsquo;{deleteTaskTarget.title}&rsquo; will be removed from your plan.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTaskTarget(null)}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteTask}
+                className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {fullDayFlow && items && !showGuestCard && !confirmNewPlan && (() => {
         const newTask = items.find((item) => item.originalIndex === fullDayFlow.taskIndex);
