@@ -161,6 +161,16 @@ interface FullDayFlow {
   message: string | null;
 }
 
+interface BreakRoomFlow {
+  item: PlanItem;
+  sourceEntryId: string | null;
+  sourceItemIndex: number;
+  stage: "options" | "move-task" | "shorten-task";
+  neededMinutes: number;
+  startMinutes: number | null;
+  shorterDurations: number[];
+}
+
 function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
 
@@ -188,10 +198,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [addMode, setAddMode] = useState<null | "task" | "break">(null);
   const [addTaskForm, setAddTaskForm] = useState<{ title: string; durationMinutes: number; priority: Priority }>({ title: "", durationMinutes: 15, priority: "medium" });
   const [splitMinutes, setSplitMinutes] = useState<Record<number, number>>({});
-  const [addBreakForm, setAddBreakForm] = useState<{ title: string; durationMinutes: number; startTime: string }>({ title: "Break", durationMinutes: 15, startTime: "12:00" });
+  const [addBreakForm, setAddBreakForm] = useState<{ title: string; durationMinutes: number }>({ title: "Break", durationMinutes: 15 });
   const [editingBreak, setEditingBreak] = useState<BreakEditForm | null>(null);
   const [openBreakActions, setOpenBreakActions] = useState<string | null>(null);
   const [suppressedBreakIds, setSuppressedBreakIds] = useState<string[]>([]);
+  const [breakRoomFlow, setBreakRoomFlow] = useState<BreakRoomFlow | null>(null);
   const historyRef = useRef<{ items: PlanItem[]; order: number[]; availableUntil: string; suppressedBreakIds: string[] } | null>(null);
   const [completedTasks, setCompletedTasks] = useState<Set<number>>(new Set());
   const [undoIdx, setUndoIdx] = useState<number | null>(null);
@@ -338,6 +349,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setEditingBreak(null);
     setOpenBreakActions(null);
     setSuppressedBreakIds([]);
+    setBreakRoomFlow(null);
     presentedConflictKeyRef.current = "";
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     try { localStorage.removeItem(PLAN_STORAGE_KEY); } catch { /* ignore */ }
@@ -771,12 +783,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const openAddBreak = () => {
-    // Default break start = end of last scheduled entry (or now), rounded to 5.
-    const lastEnd = schedule.length ? schedule[schedule.length - 1].endMinutes : nowMinutes;
-    const start = Math.min(cutoffMinutes - 5, Math.ceil(Math.max(lastEnd, nowMinutes) / 5) * 5);
-    const h = Math.floor(start / 60);
-    const m = start % 60;
-    setAddBreakForm({ title: "Break", durationMinutes: 15, startTime: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}` });
+    setAddBreakForm({ title: "Break", durationMinutes: 15 });
     setAddMode("break");
   };
 
@@ -889,21 +896,238 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     flashStatus("Your plan was updated.");
   };
 
-  const submitAddBreak = () => {
-    const duration = Math.max(5, Math.round(addBreakForm.durationMinutes / 5) * 5);
-    const [sh, sm] = addBreakForm.startTime.split(":").map((n) => parseInt(n, 10));
-    const startMin = sh * 60 + (sm || 0);
-    const endMin = startMin + duration;
-    if (startMin < nowMinutes || endMin > cutoffMinutes) {
-      flashStatus("Choose a break time inside today’s remaining planning window.");
+  const timeValue = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+  const scheduledTaskMinutesByItem = (entries: ScheduleEntry[]) => {
+    const totals = new Map<number, number>();
+    for (const entry of entries) {
+      if (entry.kind !== "task") continue;
+      totals.set(
+        entry.itemIndex,
+        (totals.get(entry.itemIndex) ?? 0) + entry.endMinutes - entry.startMinutes,
+      );
+    }
+    return totals;
+  };
+
+  const itemsWithBreak = (baseItems: PlanItem[], breakItem: PlanItem) => {
+    const exists = baseItems.some((item) => item.originalIndex === breakItem.originalIndex);
+    return exists
+      ? baseItems.map((item) =>
+          item.originalIndex === breakItem.originalIndex ? breakItem : item,
+        )
+      : [...baseItems, breakItem];
+  };
+
+  const previewBreakAt = (
+    breakItem: PlanItem,
+    sourceEntryId: string | null,
+    sourceItemIndex: number,
+    startMinutes: number,
+    previewCutoff = cutoffMinutes,
+  ) => {
+    if (!items) return null;
+    const proposedItem = {
+      ...breakItem,
+      fixedStart: timeValue(startMinutes),
+      fixedEnd: null,
+    };
+    const proposedItems = itemsWithBreak(items, proposedItem);
+    const proposedSuppressed =
+      sourceEntryId && sourceItemIndex < 0 && !suppressedBreakIds.includes(sourceEntryId)
+        ? [...suppressedBreakIds, sourceEntryId]
+        : suppressedBreakIds;
+    const result = buildSchedule({
+      items: proposedItems,
+      order: computeOrder(proposedItems, userOrder),
+      nowMinutes,
+      cutoffMinutes: previewCutoff,
+      suppressedBreakIds: proposedSuppressed,
+    });
+    const visibleBreak = result.schedule.find(
+      (entry) => entry.kind === "break" && entry.itemIndex === proposedItem.originalIndex,
+    );
+    const hasBreakOverlap = result.conflicts.some(
+      (conflict) =>
+        conflict.type === "break_overlap" &&
+        conflict.breakItemIndex === proposedItem.originalIndex,
+    );
+    if (
+      !visibleBreak ||
+      visibleBreak.endMinutes - visibleBreak.startMinutes < proposedItem.durationMinutes ||
+      hasBreakOverlap
+    ) {
+      return null;
+    }
+    const baselineTotals = scheduledTaskMinutesByItem(schedule);
+    const previewTotals = scheduledTaskMinutesByItem(result.schedule);
+    const neededMinutes = [...baselineTotals.entries()].reduce(
+      (total, [itemIndex, baselineMinutes]) =>
+        total + Math.max(0, baselineMinutes - (previewTotals.get(itemIndex) ?? 0)),
+      0,
+    );
+    return { item: proposedItem, result, neededMinutes };
+  };
+
+  const chooseBreakPlacement = (
+    breakItem: PlanItem,
+    sourceEntryId: string | null,
+    sourceItemIndex: number,
+    preferredStart?: number,
+  ) => {
+    const duration = breakItem.durationMinutes;
+    const blockingEntries = schedule.filter(
+      (entry) =>
+        entry.id !== sourceEntryId &&
+        (entry.kind === "fixed" ||
+          (entry.kind === "break" && !entry.id.startsWith("gap-"))),
+    );
+    const isSafeInterval = (start: number) =>
+      start >= nowMinutes &&
+      start + duration <= cutoffMinutes &&
+      !blockingEntries.some(
+        (entry) => entry.startMinutes < start + duration && entry.endMinutes > start,
+      );
+    const roundedPreferred =
+      preferredStart === undefined ? null : Math.ceil(preferredStart / 5) * 5;
+    if (roundedPreferred !== null && isSafeInterval(roundedPreferred)) {
+      const preview = previewBreakAt(
+        breakItem,
+        sourceEntryId,
+        sourceItemIndex,
+        roundedPreferred,
+      );
+      if (preview) return { startMinutes: roundedPreferred, ...preview };
+    }
+
+    const candidates = new Set<number>([
+      Math.ceil(nowMinutes / 5) * 5,
+      Math.max(nowMinutes, cutoffMinutes - duration),
+    ]);
+    for (const entry of schedule) {
+      if (entry.id === sourceEntryId) continue;
+      candidates.add(Math.ceil(entry.startMinutes / 5) * 5);
+      candidates.add(Math.ceil(entry.endMinutes / 5) * 5);
+    }
+    const previews = [...candidates]
+      .filter(isSafeInterval)
+      .map((startMinutes) => {
+        const preview = previewBreakAt(
+          breakItem,
+          sourceEntryId,
+          sourceItemIndex,
+          startMinutes,
+        );
+        return preview ? { startMinutes, ...preview } : null;
+      })
+      .filter(
+        (
+          candidate,
+        ): candidate is NonNullable<typeof candidate> => candidate !== null,
+      )
+      .sort(
+        (first, second) =>
+          first.neededMinutes - second.neededMinutes ||
+          first.startMinutes - second.startMinutes,
+      );
+    return previews[0] ?? null;
+  };
+
+  const shorterBreakDurations = (
+    breakItem: PlanItem,
+    sourceEntryId: string | null,
+    sourceItemIndex: number,
+  ) => {
+    const options: number[] = [];
+    for (let duration = breakItem.durationMinutes - 5; duration >= 5; duration -= 5) {
+      const placement = chooseBreakPlacement(
+        { ...breakItem, durationMinutes: duration },
+        sourceEntryId,
+        sourceItemIndex,
+      );
+      if (placement?.neededMinutes === 0) options.push(duration);
+      if (options.length === 3) break;
+    }
+    return options;
+  };
+
+  const commitBreakPlacement = (
+    flow: BreakRoomFlow,
+    baseItems = items,
+    nextCutoffMinutes = cutoffMinutes,
+  ) => {
+    if (!baseItems) return;
+    const startMinutes = flow.startMinutes ?? cutoffMinutes;
+    const placedItem = {
+      ...flow.item,
+      fixedStart: timeValue(startMinutes),
+      fixedEnd: null,
+    };
+    pushHistory();
+    setItems(itemsWithBreak(baseItems, placedItem));
+    if (
+      flow.sourceEntryId &&
+      flow.sourceItemIndex < 0 &&
+      !suppressedBreakIds.includes(flow.sourceEntryId)
+    ) {
+      setSuppressedBreakIds((current) => [...current, flow.sourceEntryId!]);
+    }
+    if (nextCutoffMinutes !== cutoffMinutes) {
+      setAvailableUntil(timeValue(nextCutoffMinutes));
+    }
+    setBreakRoomFlow(null);
+    setAddMode(null);
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    setShowConflictModal(false);
+    presentedConflictKeyRef.current = "";
+    flashStatus("Break added and the timeline was rebuilt.");
+  };
+
+  const requestBreakPlacement = (
+    breakItem: PlanItem,
+    sourceEntryId: string | null,
+    sourceItemIndex: number,
+    preferredStart?: number,
+  ) => {
+    const placement = chooseBreakPlacement(
+      breakItem,
+      sourceEntryId,
+      sourceItemIndex,
+      preferredStart,
+    );
+    const flow: BreakRoomFlow = {
+      item: placement?.item ?? breakItem,
+      sourceEntryId,
+      sourceItemIndex,
+      stage: "options",
+      neededMinutes: placement?.neededMinutes ?? breakItem.durationMinutes,
+      startMinutes: placement?.startMinutes ?? null,
+      shorterDurations: shorterBreakDurations(
+        breakItem,
+        sourceEntryId,
+        sourceItemIndex,
+      ),
+    };
+    if (placement && placement.neededMinutes === 0) {
+      commitBreakPlacement(flow);
       return;
     }
-    const idx = nextIndex();
+    setAddMode(null);
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    setShowConflictModal(false);
+    setBreakRoomFlow(flow);
+  };
+
+  const submitAddBreak = () => {
+    const duration = Math.max(5, Math.round(addBreakForm.durationMinutes / 5) * 5);
     const newItem: PlanItem = {
-      originalIndex: idx,
+      originalIndex: nextIndex(),
       itemType: "break",
       title: addBreakForm.title.trim() || "Break",
-      durationMinutes: endMin - startMin,
+      durationMinutes: duration,
       priority: "low",
       requiredToday: false,
       reason: "Manual break",
@@ -912,30 +1136,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       dueCategory: "none",
       suggestedDay: "today",
       isFixed: false,
-      fixedStart: addBreakForm.startTime,
+      fixedStart: null,
       fixedEnd: null,
       focusBlockMinutes: null,
       note: null,
       breakLocked: false,
     };
-    const duplicate = schedule.some(
-      (entry) =>
-        entry.kind === "break" &&
-        entry.startMinutes === startMin,
-    );
-    if (duplicate) {
-      flashStatus("A break already exists at that time.");
-      return;
-    }
-    pushHistory();
-    presentedConflictKeyRef.current = "";
-    setItems((prev) => (prev ? [...prev, newItem] : [newItem]));
-    setAddMode(null);
-    flashStatus("Break added.");
+    requestBreakPlacement(newItem, null, -1);
   };
-
-  const timeValue = (minutes: number) =>
-    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
   const beginBreakEdit = (entry: ScheduleEntry) => {
     setEditingBreak({
@@ -949,39 +1157,32 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const saveBreakEdit = () => {
-    if (!editingBreak) return;
+    if (!editingBreak || !items) return;
     const duration = Math.max(5, Math.round(editingBreak.durationMinutes / 5) * 5);
     const startMinutes = hhmmToMinutes(editingBreak.startTime);
-    if (startMinutes + duration > cutoffMinutes) {
-      flashStatus("That break would end after your available-until time.");
-      return;
-    }
-    pushHistory();
-    presentedConflictKeyRef.current = "";
     const title = editingBreak.title.trim() || "Break";
     if (editingBreak.itemIndex >= 0) {
-      updateItems((prev) =>
-        prev.map((item) =>
-          item.originalIndex === editingBreak.itemIndex
-            ? {
-                ...item,
-                itemType: "break",
-                title,
-                durationMinutes: duration,
-                isFixed: false,
-                fixedStart: editingBreak.startTime,
-                fixedEnd: null,
-              }
-            : item,
-        ),
+      const existing = items.find(
+        (item) => item.originalIndex === editingBreak.itemIndex,
+      );
+      if (!existing) return;
+      requestBreakPlacement(
+        {
+          ...existing,
+          itemType: "break",
+          title,
+          durationMinutes: duration,
+          isFixed: false,
+          fixedStart: editingBreak.startTime,
+          fixedEnd: null,
+        },
+        editingBreak.entryId,
+        editingBreak.itemIndex,
+        startMinutes,
       );
     } else {
-      const idx = nextIndex();
-      setSuppressedBreakIds((current) =>
-        current.includes(editingBreak.entryId) ? current : [...current, editingBreak.entryId],
-      );
       const newBreak: PlanItem = {
-        originalIndex: idx,
+        originalIndex: nextIndex(),
         itemType: "break",
         title,
         durationMinutes: duration,
@@ -999,11 +1200,13 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         note: null,
         breakLocked: false,
       };
-      setItems((current) => (current ? [...current, newBreak] : [newBreak]));
+      requestBreakPlacement(
+        newBreak,
+        editingBreak.entryId,
+        -1,
+        startMinutes,
+      );
     }
-    setEditingBreak(null);
-    setOpenBreakActions(null);
-    flashStatus("Break updated and the timeline was rebuilt.");
   };
 
   const deleteBreak = (entry: ScheduleEntry) => {
@@ -1021,28 +1224,21 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const relocateBreak = (entry: ScheduleEntry, requestedStart: number) => {
+    if (!items) return;
     const duration = entry.endMinutes - entry.startMinutes;
-    const start = Math.max(nowMinutes, Math.min(requestedStart, cutoffMinutes - duration));
-    const startTime = timeValue(Math.ceil(start / 5) * 5);
-    pushHistory();
-    presentedConflictKeyRef.current = "";
     if (entry.itemIndex >= 0) {
-      updateItems((prev) =>
-        prev.map((item) =>
-          item.originalIndex === entry.itemIndex
-            ? { ...item, itemType: "break", isFixed: false, fixedStart: startTime, fixedEnd: null }
-            : item,
-        ),
+      const existing = items.find((item) => item.originalIndex === entry.itemIndex);
+      if (!existing) return;
+      requestBreakPlacement(
+        { ...existing, itemType: "break", isFixed: false, fixedEnd: null },
+        entry.id,
+        entry.itemIndex,
+        requestedStart,
       );
     } else {
-      const idx = nextIndex();
-      setSuppressedBreakIds((current) =>
-        current.includes(entry.id) ? current : [...current, entry.id],
-      );
-      setItems((current) => [
-        ...(current ?? []),
+      requestBreakPlacement(
         {
-          originalIndex: idx,
+          originalIndex: nextIndex(),
           itemType: "break",
           title: entry.title,
           durationMinutes: duration,
@@ -1054,16 +1250,115 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           dueCategory: "none",
           suggestedDay: "today",
           isFixed: false,
-          fixedStart: startTime,
+          fixedStart: null,
           fixedEnd: null,
           focusBlockMinutes: null,
           note: null,
           breakLocked: false,
         },
-      ]);
+        entry.id,
+        -1,
+        requestedStart,
+      );
     }
+  };
+
+  const movableTasksForBreak = breakRoomFlow && breakRoomFlow.startMinutes !== null && items
+    ? items
+        .filter(
+          (item) =>
+            item.itemType !== "break" &&
+            !item.isFixed &&
+            !item.removedFromPlan &&
+            item.suggestedDay === "today",
+        )
+        .map((item) => ({
+          item,
+          plannedMinutes: item.todayDurationMinutes ?? item.durationMinutes,
+          scheduledMinutes: schedule
+            .filter(
+              (entry) =>
+                entry.kind === "task" && entry.itemIndex === item.originalIndex,
+            )
+            .reduce(
+              (total, entry) => total + entry.endMinutes - entry.startMinutes,
+              0,
+            ),
+        }))
+        .filter(
+          ({ scheduledMinutes, plannedMinutes }) =>
+            scheduledMinutes === plannedMinutes &&
+            scheduledMinutes >= breakRoomFlow.neededMinutes,
+        )
+    : [];
+
+  const applyBreakTaskChoice = (itemIndex: number) => {
+    if (!breakRoomFlow || !items) return;
+    const requiredMinutes = breakRoomFlow.neededMinutes;
+    const adjustedItems = items.map((item) => {
+      if (item.originalIndex !== itemIndex) return item;
+      const currentTodayMinutes =
+        item.todayDurationMinutes ?? item.durationMinutes;
+      const movedMinutes = Math.min(requiredMinutes, currentTodayMinutes);
+      const nextTodayMinutes = Math.max(0, currentTodayMinutes - movedMinutes);
+      return {
+        ...item,
+        suggestedDay: nextTodayMinutes === 0 ? ("tomorrow" as const) : item.suggestedDay,
+        deferredByUser: nextTodayMinutes === 0 ? true : item.deferredByUser,
+        todayDurationMinutes: nextTodayMinutes,
+        remainingDurationMinutes:
+          (item.remainingDurationMinutes ?? 0) + movedMinutes,
+      };
+    });
+    commitBreakPlacement(breakRoomFlow, adjustedItems);
+  };
+
+  const extendForBreak = () => {
+    if (!breakRoomFlow) return;
+    const nextCutoff = cutoffMinutes + breakRoomFlow.neededMinutes;
+    if (nextCutoff > 23 * 60 + 59) return;
+    commitBreakPlacement(breakRoomFlow, items, nextCutoff);
+  };
+
+  const selectShorterBreak = (durationMinutes: number) => {
+    if (!breakRoomFlow) return;
+    const shorterItem = { ...breakRoomFlow.item, durationMinutes };
+    const placement = chooseBreakPlacement(
+      shorterItem,
+      breakRoomFlow.sourceEntryId,
+      breakRoomFlow.sourceItemIndex,
+    );
+    if (!placement || placement.neededMinutes > 0) return;
+    commitBreakPlacement({
+      ...breakRoomFlow,
+      item: placement.item,
+      neededMinutes: 0,
+      startMinutes: placement.startMinutes,
+      shorterDurations: [],
+    });
+  };
+
+  const skipPendingBreak = () => {
+    if (!breakRoomFlow || !items) return;
+    if (breakRoomFlow.sourceItemIndex >= 0) {
+      pushHistory();
+      setItems(
+        items.filter(
+          (item) => item.originalIndex !== breakRoomFlow.sourceItemIndex,
+        ),
+      );
+    } else if (breakRoomFlow.sourceEntryId) {
+      pushHistory();
+      setSuppressedBreakIds((current) =>
+        current.includes(breakRoomFlow.sourceEntryId!)
+          ? current
+          : [...current, breakRoomFlow.sourceEntryId!],
+      );
+    }
+    setBreakRoomFlow(null);
+    setEditingBreak(null);
     setOpenBreakActions(null);
-    flashStatus("Break moved and the timeline was rebuilt.");
+    flashStatus("Break skipped.");
   };
 
 
@@ -1775,26 +2070,17 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                       />
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="flex-1">
-                        <label className="block text-xs font-medium text-muted-foreground mb-1">Start at</label>
-                        <WheelTimePicker
-                          value={addBreakForm.startTime}
-                          onChange={(v) => setAddBreakForm({ ...addBreakForm, startTime: v })}
-                          ariaLabel="Break start time"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
-                        <input
-                          type="number"
-                          min={5}
-                          step={5}
-                          value={addBreakForm.durationMinutes}
-                          onChange={(e) => setAddBreakForm({ ...addBreakForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
-                          className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground">Duration (min)</label>
+                      <input
+                        type="number"
+                        min={5}
+                        step={5}
+                        value={addBreakForm.durationMinutes}
+                        onChange={(e) => setAddBreakForm({ ...addBreakForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
+                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">DailyNest will place it in the next workable spot.</p>
                     </div>
                     <div className="flex justify-end gap-2 pt-1">
                       <button type="button" onClick={() => setAddMode(null)} className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs hover:bg-accent">Cancel</button>
@@ -2396,7 +2682,103 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         );
       })()}
 
-      {showConflictModal && breakConflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (() => {
+      {breakRoomFlow && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="break-room-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 id="break-room-title" className="font-serif text-2xl text-foreground">
+                  Make room for a {breakRoomFlow.item.durationMinutes}-minute break
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Your plan needs {formatDuration(breakRoomFlow.neededMinutes)} more. Choose one adjustment and DailyNest will place the break automatically.
+                </p>
+              </div>
+              <button type="button" onClick={skipPendingBreak} aria-label="Close and skip this break" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {breakRoomFlow.stage === "options" ? (
+              <div className="mt-5 space-y-2">
+                <button
+                  type="button"
+                  disabled={cutoffMinutes + breakRoomFlow.neededMinutes > 23 * 60 + 59}
+                  onClick={extendForBreak}
+                  className="w-full rounded-xl border border-border bg-background p-3 text-left hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="block text-sm font-medium text-foreground">Extend available time</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Move today&apos;s stop time {formatDuration(breakRoomFlow.neededMinutes)} later.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={movableTasksForBreak.length === 0}
+                  onClick={() => setBreakRoomFlow((current) => current ? { ...current, stage: "move-task" } : current)}
+                  className="w-full rounded-xl border border-border bg-background p-3 text-left hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="block text-sm font-medium text-foreground">Move a task</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Move enough flexible work to tomorrow to create room. Fixed commitments cannot be moved.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={movableTasksForBreak.length === 0}
+                  onClick={() => setBreakRoomFlow((current) => current ? { ...current, stage: "shorten-task" } : current)}
+                  className="w-full rounded-xl border border-border bg-background p-3 text-left hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="block text-sm font-medium text-foreground">Shorten a task</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Reduce today&apos;s scheduled portion and preserve the remaining work for tomorrow.
+                  </span>
+                </button>
+                {breakRoomFlow.shorterDurations.length > 0 && (
+                  <div className="rounded-xl border border-border bg-background p-3">
+                    <span className="block text-sm font-medium text-foreground">Use a shorter break</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">Choose a duration that fits without moving any work.</span>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {breakRoomFlow.shorterDurations.map((duration) => (
+                        <button key={duration} type="button" onClick={() => selectShorterBreak(duration)} className="rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-foreground hover:bg-accent">
+                          {duration} minutes
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button type="button" onClick={skipPendingBreak} className="w-full rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+                  Skip this break
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5">
+                <p className="text-sm text-muted-foreground">
+                  Select one movable task. {formatDuration(breakRoomFlow.neededMinutes)} will be preserved for tomorrow.
+                </p>
+                <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {movableTasksForBreak.map(({ item, scheduledMinutes }) => (
+                    <button key={item.originalIndex} type="button" onClick={() => applyBreakTaskChoice(item.originalIndex)} className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background p-3 text-left hover:bg-accent/60">
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-foreground">{item.title}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {breakRoomFlow.stage === "move-task" ? "Move" : "Shorten by"} {formatDuration(breakRoomFlow.neededMinutes)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{formatDuration(scheduledMinutes)} today</span>
+                    </button>
+                  ))}
+                </div>
+                <button type="button" onClick={() => setBreakRoomFlow((current) => current ? { ...current, stage: "options" } : current)} className="mt-4 w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground hover:bg-accent">
+                  Back
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showConflictModal && !breakRoomFlow && breakConflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (() => {
         const conflict = breakConflicts[0];
         const breakItem = items.find((item) => item.originalIndex === conflict.breakItemIndex);
         const otherItem = items.find((item) => item.originalIndex === conflict.otherItemIndex);
@@ -2425,7 +2807,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
         );
       })()}
 
-      {showConflictModal && breakConflicts.length === 0 && conflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
+      {showConflictModal && !breakRoomFlow && breakConflicts.length === 0 && conflicts.length > 0 && items && !crowded && !fullDayFlow && !showGuestCard && !confirmNewPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/20 px-4">
           <div role="dialog" aria-modal="true" aria-labelledby="conflict-modal-title" className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-xl sm:p-6">
             <div className="flex items-start justify-between gap-4">
