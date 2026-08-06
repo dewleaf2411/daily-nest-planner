@@ -1885,12 +1885,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       {renderDropZone(mapIndex)}
                       <li
                         id={item && (entry.kind === "fixed" || entry.isFirstBlock) ? `plan-item-${item.originalIndex}` : undefined}
-                        draggable={isFlexible && !isEditing}
-                        onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
-                        onDragEnd={endDrag}
-                        onDragOver={onDragOver}
-                        onDrop={onDropOnCard(mapIndex)}
-                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
+                        data-card-pos={mapIndex}
+                        onPointerDown={isFlexible && item && !isEditing ? onCardPointerDown({ pos: mapIndex, itemIndex: item.originalIndex }) : undefined}
+                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${isFlexible && !isEditing ? "cursor-grab touch-none select-none" : ""} ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""} ${isDraggingCard && item && dragIdxRef.current === item.originalIndex ? "opacity-50" : ""}`}
                       >
                         <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
                           <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
