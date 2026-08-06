@@ -1822,7 +1822,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               {scheduleWithMeta.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
-                <ol className="mt-5 space-y-2.5">
+                <ol ref={listRef} className="mt-5 space-y-2.5">
                   {scheduleWithMeta.map(({ entry, item }, mapIndex) => {
                     if (entry.kind === "break") {
                       const isBreakEditing = editingBreak?.entryId === entry.id;
