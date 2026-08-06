@@ -1447,6 +1447,22 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const onDropOnCard = (pos: number) => (e: React.DragEvent) => {
     onDropAtPosition(pos)(e);
   };
+  const renderDropZone = (pos: number) => (
+    <li
+      key={`drop-zone-${pos}`}
+      aria-hidden
+      onDragOver={onZoneDragOver(pos)}
+      onDragLeave={() => setDropPos((current) => (current === pos ? null : current))}
+      onDrop={onDropAtPosition(pos)}
+      className={`relative list-none transition-all ${isDraggingCard ? "h-6 -my-2" : "h-0 pointer-events-none"}`}
+    >
+      {isDraggingCard && (
+        <span
+          className={`pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full transition-colors ${dropPos === pos ? "bg-primary" : "bg-transparent"}`}
+        />
+      )}
+    </li>
+  );
 
   // Group schedule entries by task to render blocks together
   const scheduleWithMeta = schedule.map((s) => {
