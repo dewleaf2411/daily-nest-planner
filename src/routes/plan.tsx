@@ -2040,8 +2040,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           </div>
                         </div>
                       </li>
+                      </Fragment>
                     );
                   })}
+                  {renderDropZone(scheduleWithMeta.length)}
                 </ol>
               )}
 
