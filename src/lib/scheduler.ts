@@ -518,23 +518,27 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
         todayDuration(item) > 0,
     )
     .map((item) => item.originalIndex);
-  const importantToday = flexToday.filter((index) => {
+  const isImportant = (index: number) => {
     const item = items.find((candidate) => candidate.originalIndex === index);
-    return item?.requiredToday || item?.dueCategory === "today";
-  });
-  const seen = new Set(
-    userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
-  );
+    return Boolean(item?.requiredToday || item?.dueCategory === "today");
+  };
+  // A manual order the user set by dragging always wins, including for
+  // due-today tasks. Anything they haven't touched keeps the default
+  // important-first, then priority ordering.
+  const manual: number[] = [];
+  for (const index of userOrder) {
+    if (flexToday.includes(index) && !manual.includes(index)) manual.push(index);
+  }
   const rest = flexToday
-    .filter((index) => !seen.has(index) && !importantToday.includes(index))
+    .filter((index) => !manual.includes(index))
     .sort((a, b) => {
       const first = items.find((item) => item.originalIndex === a)!;
       const second = items.find((item) => item.originalIndex === b)!;
-      return priorityRank[first.priority] - priorityRank[second.priority] || a - b;
+      return (
+        Number(isImportant(b)) - Number(isImportant(a)) ||
+        priorityRank[first.priority] - priorityRank[second.priority] ||
+        a - b
+      );
     });
-  return [
-    ...importantToday,
-    ...userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
-    ...rest,
-  ];
+  return [...manual, ...rest];
 }
