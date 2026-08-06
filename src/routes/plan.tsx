@@ -1375,6 +1375,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const dragPosRef = useRef<number | null>(null);
   const [isDraggingCard, setIsDraggingCard] = useState(false);
   const [dropPos, setDropPos] = useState<number | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    html: string;
+    width: number;
+    className: string;
+  } | null>(null);
+  const [ghostPoint, setGhostPoint] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   // Auto-scroll the page while dragging near the top/bottom of the viewport
   const pointerYRef = useRef(0);
