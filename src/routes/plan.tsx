@@ -724,7 +724,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       const spillover: PlanItem & { parentTaskIndex: number } = {
         ...src,
         originalIndex: newIdx,
-        parentTaskIndex: src.parentTaskIndex ?? src.originalIndex,
+        parentTaskIndex:
+          (src as PlanItem & { parentTaskIndex?: number }).parentTaskIndex ?? src.originalIndex,
+
         durationMinutes: rounded,
         suggestedDay: "tomorrow" as const,
         isFixed: false,
@@ -1776,7 +1778,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           {isBreakEditing && editingBreak && (
                             <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]" onClick={(event) => event.stopPropagation()}>
                               <input value={editingBreak.title} onChange={(event) => setEditingBreak({ ...editingBreak, title: event.target.value })} aria-label="Break name" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
-                              <input type="time" value={editingBreak.startTime} onChange={(event) => setEditingBreak({ ...editingBreak, startTime: event.target.value })} aria-label="Break start time" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
+                              <div className="w-[150px]"><WheelTimePicker value={editingBreak.startTime} onChange={(v) => setEditingBreak({ ...editingBreak, startTime: v })} ariaLabel="Break start time" /></div>
                               <label className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <input type="number" min={5} step={5} value={editingBreak.durationMinutes} onChange={(event) => setEditingBreak({ ...editingBreak, durationMinutes: parseInt(event.target.value, 10) || 5 })} aria-label="Break duration in minutes" className="w-16 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground" />
                                 min
@@ -1857,21 +1859,22 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                   <div className="flex flex-col gap-2 sm:flex-row">
                                     <div className="flex-1">
                                       <label className="block text-xs font-medium text-muted-foreground">Starts at</label>
-                                      <input
-                                        type="time"
+                                      <WheelTimePicker
                                         value={editForm.fixedStart}
-                                        onChange={(e) => setEditForm({ ...editForm, fixedStart: e.target.value })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                        onChange={(v) => setEditForm({ ...editForm, fixedStart: v })}
+                                        ariaLabel="Starts at"
+                                        className="mt-1"
                                       />
                                     </div>
                                     <div className="flex-1">
                                       <label className="block text-xs font-medium text-muted-foreground">Ends at</label>
-                                      <input
-                                        type="time"
+                                      <WheelTimePicker
                                         value={editForm.fixedEnd}
-                                        onChange={(e) => setEditForm({ ...editForm, fixedEnd: e.target.value })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                        onChange={(v) => setEditForm({ ...editForm, fixedEnd: v })}
+                                        ariaLabel="Ends at"
+                                        className="mt-1"
                                       />
+
                                     </div>
                                   </div>
                                 )}
