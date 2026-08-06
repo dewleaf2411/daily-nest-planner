@@ -1831,13 +1831,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         <Fragment key={entry.id}>
                         {renderDropZone(mapIndex)}
                         <li
-                          draggable={!isBreakEditing}
-                          onDragStart={onBreakDragStart(entry)}
-                          onDragEnd={endDrag}
-                          onDragOver={onDragOver}
-                          onDrop={onDropOnCard(mapIndex)}
-                          onClick={() => setOpenBreakActions((current) => current === entry.id ? null : entry.id)}
-                          className="group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4"
+                          data-card-pos={mapIndex}
+                          onPointerDown={isBreakEditing ? undefined : onCardPointerDown({ pos: mapIndex, breakEntry: entry })}
+                          onClick={() => { if (!isDraggingCard) setOpenBreakActions((current) => current === entry.id ? null : entry.id); }}
+                          className={`group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4 ${isBreakEditing ? "" : "cursor-grab touch-none select-none"} ${isDraggingCard && dragBreakRef.current?.id === entry.id ? "opacity-50" : ""}`}
                         >
                           <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
                             <div className="flex items-center gap-1 text-primary">
