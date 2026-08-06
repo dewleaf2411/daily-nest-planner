@@ -1927,6 +1927,24 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">{status}</div>
               )}
 
+              {dragGhost && ghostPoint && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none fixed z-50 opacity-70"
+                  style={{
+                    left: ghostPoint.x,
+                    top: ghostPoint.y,
+                    width: dragGhost.width,
+                    transform: "rotate(-0.4deg) scale(1.01)",
+                  }}
+                >
+                  <div
+                    className={`${dragGhost.className} shadow-lg`}
+                    dangerouslySetInnerHTML={{ __html: dragGhost.html }}
+                  />
+                </div>
+              )}
+
               {scheduleWithMeta.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
