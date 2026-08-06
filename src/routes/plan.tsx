@@ -1486,7 +1486,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       list.querySelectorAll<HTMLElement>("[data-card-pos]"),
     );
     if (cards.length === 0) return null;
-    const from = dragPosRef.current;
+    
     const boundaries: { pos: number; y: number }[] = [];
     for (const card of cards) {
       const rect = card.getBoundingClientRect();
