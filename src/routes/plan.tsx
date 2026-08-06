@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check, Trash2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
@@ -1365,17 +1365,28 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
 
 
-  // Drag-and-drop for flexible today tasks
+  // Drag-and-drop for flexible today tasks and breaks
   const dragIdxRef = useRef<number | null>(null);
   const dragBreakRef = useRef<ScheduleEntry | null>(null);
+  const [isDraggingCard, setIsDraggingCard] = useState(false);
+  const [dropPos, setDropPos] = useState<number | null>(null);
+  const endDrag = () => {
+    dragIdxRef.current = null;
+    dragBreakRef.current = null;
+    setIsDraggingCard(false);
+    setDropPos(null);
+  };
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
     dragBreakRef.current = null;
     dragIdxRef.current = idx;
+    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(idx));
   };
   const onBreakDragStart = (entry: ScheduleEntry) => (e: React.DragEvent) => {
     dragIdxRef.current = null;
     dragBreakRef.current = entry;
+    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", entry.id);
   };
@@ -1383,33 +1394,75 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-  const onDrop = (targetIdx: number) => (e: React.DragEvent) => {
+  const onZoneDragOver = (pos: number) => (e: React.DragEvent) => {
     e.preventDefault();
-    if (dragBreakRef.current) {
-      const target = schedule.find((entry) => entry.itemIndex === targetIdx);
-      if (target) relocateBreak(dragBreakRef.current, target.startMinutes);
-      dragBreakRef.current = null;
+    e.dataTransfer.dropEffect = "move";
+    setDropPos((current) => (current === pos ? current : pos));
+  };
+  // Drop into the gap at position `pos` (0 = before the first card)
+  const onDropAtPosition = (pos: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const brk = dragBreakRef.current;
+    const src = dragIdxRef.current;
+    endDrag();
+
+    if (brk) {
+      const after = scheduleWithMeta
+        .slice(pos)
+        .find((m) => m.entry.id !== brk.id);
+      const before = [...scheduleWithMeta.slice(0, pos)]
+        .reverse()
+        .find((m) => m.entry.id !== brk.id);
+      const startMinutes = after
+        ? after.entry.startMinutes
+        : before
+          ? before.entry.endMinutes
+          : brk.startMinutes;
+      if (startMinutes !== brk.startMinutes) relocateBreak(brk, startMinutes);
       return;
     }
-    const src = dragIdxRef.current;
-    dragIdxRef.current = null;
-    if (src === null || src === targetIdx) return;
+
+    if (src === null) return;
     const cur = [...order];
     const from = cur.indexOf(src);
-    const to = cur.indexOf(targetIdx);
-    if (from < 0 || to < 0) return;
-    cur.splice(to, 0, cur.splice(from, 1)[0]);
+    if (from < 0) return;
+    let targetIdx: number | null = null;
+    for (let i = pos; i < scheduleWithMeta.length; i++) {
+      const m = scheduleWithMeta[i];
+      if (m.entry.kind === "task" && m.item && m.item.originalIndex !== src) {
+        targetIdx = m.item.originalIndex;
+        break;
+      }
+    }
+    cur.splice(from, 1);
+    const to = targetIdx === null ? cur.length : cur.indexOf(targetIdx);
+    if (to < 0) return;
+    cur.splice(to, 0, src);
+    if (cur.every((value, index) => value === order[index])) return;
     pushHistory();
     setUserOrder(cur);
     flashStatus("Your order was kept and the timeline was rebuilt.");
   };
-  const onDropAtEntry = (target: ScheduleEntry) => (event: React.DragEvent) => {
-    if (!dragBreakRef.current) return;
-    event.preventDefault();
-    const source = dragBreakRef.current;
-    dragBreakRef.current = null;
-    if (source.id !== target.id) relocateBreak(source, target.startMinutes);
+  // Dropping directly on a card = drop just before that card
+  const onDropOnCard = (pos: number) => (e: React.DragEvent) => {
+    onDropAtPosition(pos)(e);
   };
+  const renderDropZone = (pos: number) => (
+    <li
+      key={`drop-zone-${pos}`}
+      aria-hidden
+      onDragOver={onZoneDragOver(pos)}
+      onDragLeave={() => setDropPos((current) => (current === pos ? null : current))}
+      onDrop={onDropAtPosition(pos)}
+      className={`relative list-none transition-all ${isDraggingCard ? "h-6 -my-2" : "h-0 pointer-events-none"}`}
+    >
+      {isDraggingCard && (
+        <span
+          className={`pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full transition-colors ${dropPos === pos ? "bg-primary" : "bg-transparent"}`}
+        />
+      )}
+    </li>
+  );
 
   // Group schedule entries by task to render blocks together
   const scheduleWithMeta = schedule.map((s) => {
@@ -1737,17 +1790,19 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
                 <ol className="mt-5 space-y-2.5">
-                  {scheduleWithMeta.map(({ entry, item }) => {
+                  {scheduleWithMeta.map(({ entry, item }, mapIndex) => {
                     if (entry.kind === "break") {
                       const isBreakEditing = editingBreak?.entryId === entry.id;
                       const actionsOpen = openBreakActions === entry.id;
                       return (
+                        <Fragment key={entry.id}>
+                        {renderDropZone(mapIndex)}
                         <li
-                          key={entry.id}
                           draggable={!isBreakEditing}
                           onDragStart={onBreakDragStart(entry)}
+                          onDragEnd={endDrag}
                           onDragOver={onDragOver}
-                          onDrop={onDropAtEntry(entry)}
+                          onDrop={onDropOnCard(mapIndex)}
                           onClick={() => setOpenBreakActions((current) => current === entry.id ? null : entry.id)}
                           className="group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4"
                         >
@@ -1790,18 +1845,21 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                             </div>
                           )}
                         </li>
+                        </Fragment>
                       );
                     }
                     const isEditing = item && editingIdx === item.originalIndex;
                     const isFlexible = entry.kind === "task";
                     return (
+                      <Fragment key={entry.id}>
+                      {renderDropZone(mapIndex)}
                       <li
                         id={item && (entry.kind === "fixed" || entry.isFirstBlock) ? `plan-item-${item.originalIndex}` : undefined}
-                        key={entry.id}
                         draggable={isFlexible && !isEditing}
                         onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
+                        onDragEnd={endDrag}
                         onDragOver={onDragOver}
-                        onDrop={item ? onDrop(item.originalIndex) : onDropAtEntry(entry)}
+                        onDrop={onDropOnCard(mapIndex)}
                         className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
                       >
                         <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
@@ -1982,8 +2040,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           </div>
                         </div>
                       </li>
+                      </Fragment>
                     );
                   })}
+                  {renderDropZone(scheduleWithMeta.length)}
                 </ol>
               )}
 
