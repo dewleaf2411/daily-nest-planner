@@ -1497,10 +1497,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       pos: Number(cards[cards.length - 1].dataset.cardPos) + 1,
       y: lastRect.bottom,
     });
-    const usable =
-      from === null
-        ? boundaries
-        : boundaries.filter((b) => b.pos !== from && b.pos !== from + 1);
+    const usable = boundaries;
     if (usable.length === 0) return null;
     let best = usable[0];
     for (const candidate of usable) {
