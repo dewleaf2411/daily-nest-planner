@@ -185,6 +185,7 @@ export function buildSchedule({
     if (
       !item.removedFromPlan &&
       !item.isFixed &&
+      item.itemType !== "break" &&
       item.suggestedDay === "today" &&
       todayDuration(item) > 0 &&
       !queued.has(item.originalIndex)
