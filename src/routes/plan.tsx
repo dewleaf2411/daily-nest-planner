@@ -1376,12 +1376,58 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const [isDraggingCard, setIsDraggingCard] = useState(false);
   const [dropPos, setDropPos] = useState<number | null>(null);
 
+  // Auto-scroll the page while dragging near the top/bottom of the viewport
+  const pointerYRef = useRef(0);
+  const autoScrollRafRef = useRef<number | null>(null);
+  const positionFromPointerRef = useRef<(clientY: number) => number | null>(
+    () => null,
+  );
+
+  const stopAutoScroll = () => {
+    if (autoScrollRafRef.current !== null) {
+      cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }
+  };
+
+  const startAutoScroll = () => {
+    if (autoScrollRafRef.current !== null) return;
+    const EDGE = 110; // px from the viewport edge where scrolling kicks in
+    const MAX_SPEED = 18; // px per frame at the very edge
+    const step = () => {
+      if (!dragActiveRef.current) {
+        autoScrollRafRef.current = null;
+        return;
+      }
+      const y = pointerYRef.current;
+      const height = window.innerHeight;
+      let delta = 0;
+      if (y < EDGE) delta = -MAX_SPEED * Math.min(1, (EDGE - y) / EDGE);
+      else if (y > height - EDGE)
+        delta = MAX_SPEED * Math.min(1, (y - (height - EDGE)) / EDGE);
+      if (delta !== 0) {
+        const before = window.scrollY;
+        window.scrollBy(0, delta);
+        if (window.scrollY !== before) {
+          const pos = positionFromPointerRef.current(y);
+          dropPosRef.current = pos;
+          setDropPos(pos);
+        }
+      }
+      autoScrollRafRef.current = requestAnimationFrame(step);
+    };
+    autoScrollRafRef.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => stopAutoScroll, []);
+
   const endDrag = () => {
     dragIdxRef.current = null;
     dragBreakRef.current = null;
     dragActiveRef.current = false;
     dropPosRef.current = null;
     dragPosRef.current = null;
+    stopAutoScroll();
     setIsDraggingCard(false);
     setDropPos(null);
   };
