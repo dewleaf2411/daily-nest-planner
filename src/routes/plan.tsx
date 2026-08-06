@@ -1429,20 +1429,38 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const commitDropRef = useRef(commitDrop);
   commitDropRef.current = commitDrop;
 
+  // Snap to the nearest gap between cards, skipping the two positions that
+  // would leave the dragged card exactly where it already is.
   const positionFromPointer = (clientY: number) => {
     const list = listRef.current;
     if (!list) return null;
     const cards = Array.from(
       list.querySelectorAll<HTMLElement>("[data-card-pos]"),
     );
+    if (cards.length === 0) return null;
+    const from = dragPosRef.current;
+    const boundaries: { pos: number; y: number }[] = [];
     for (const card of cards) {
       const rect = card.getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) {
-        return Number(card.dataset.cardPos);
+      boundaries.push({ pos: Number(card.dataset.cardPos), y: rect.top });
+    }
+    const lastRect = cards[cards.length - 1].getBoundingClientRect();
+    boundaries.push({
+      pos: Number(cards[cards.length - 1].dataset.cardPos) + 1,
+      y: lastRect.bottom,
+    });
+    const usable =
+      from === null
+        ? boundaries
+        : boundaries.filter((b) => b.pos !== from && b.pos !== from + 1);
+    if (usable.length === 0) return null;
+    let best = usable[0];
+    for (const candidate of usable) {
+      if (Math.abs(clientY - candidate.y) < Math.abs(clientY - best.y)) {
+        best = candidate;
       }
     }
-    const last = cards[cards.length - 1];
-    return last ? Number(last.dataset.cardPos) + 1 : 0;
+    return best.pos;
   };
 
   const onCardPointerDown =
@@ -1453,6 +1471,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       if (target.closest("button, input, textarea, select, a, [role='checkbox']")) return;
       dragIdxRef.current = options.itemIndex ?? null;
       dragBreakRef.current = options.breakEntry ?? null;
+      dragPosRef.current = options.pos;
       dragStartYRef.current = event.clientY;
       dragActiveRef.current = false;
       dropPosRef.current = null;
@@ -1482,19 +1501,30 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       window.addEventListener("pointercancel", up);
     };
 
-  const renderDropZone = (pos: number) => (
-    <li
-      key={`drop-zone-${pos}`}
-      aria-hidden
-      className={`pointer-events-none relative list-none transition-all ${isDraggingCard ? "h-5 -my-1.5" : "h-0"}`}
-    >
-      {isDraggingCard && (
-        <span
-          className={`absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full transition-colors ${dropPos === pos ? "bg-primary" : "bg-transparent"}`}
-        />
-      )}
-    </li>
-  );
+  const renderDropZone = (pos: number) => {
+    const active = isDraggingCard && dropPos === pos;
+    return (
+      <li
+        key={`drop-zone-${pos}`}
+        aria-hidden
+        className={`pointer-events-none relative list-none transition-all duration-150 ${isDraggingCard ? (active ? "h-9 -my-1" : "h-4 -my-1") : "h-0"}`}
+      >
+        {isDraggingCard && (
+          <span className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center">
+            {active ? (
+              <>
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+                <span className="h-[3px] flex-1 rounded-full bg-primary shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_18%,transparent)]" />
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+              </>
+            ) : (
+              <span className="h-px flex-1 rounded-full border-t border-dashed border-primary/25" />
+            )}
+          </span>
+        )}
+      </li>
+    );
+  };
 
 
   // Group schedule entries by task to render blocks together
