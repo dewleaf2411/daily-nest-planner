@@ -1376,19 +1376,23 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setIsDraggingCard(false);
     setDropPos(null);
   };
+  // Defer the re-render: mutating the list during dragstart cancels the drag in Chrome
+  const beginDragVisuals = () => {
+    window.setTimeout(() => setIsDraggingCard(true), 0);
+  };
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
     dragBreakRef.current = null;
     dragIdxRef.current = idx;
-    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(idx));
+    beginDragVisuals();
   };
   const onBreakDragStart = (entry: ScheduleEntry) => (e: React.DragEvent) => {
     dragIdxRef.current = null;
     dragBreakRef.current = entry;
-    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", entry.id);
+    beginDragVisuals();
   };
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
