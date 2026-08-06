@@ -1438,6 +1438,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     stopAutoScroll();
     setIsDraggingCard(false);
     setDropPos(null);
+    setDragGhost(null);
+    setGhostPoint(null);
   };
 
   // Drop into the gap at position `pos` (0 = before the first card)
