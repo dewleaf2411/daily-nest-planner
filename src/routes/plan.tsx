@@ -724,7 +724,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       const spillover: PlanItem & { parentTaskIndex: number } = {
         ...src,
         originalIndex: newIdx,
-        parentTaskIndex: src.parentTaskIndex ?? src.originalIndex,
+        parentTaskIndex:
+          (src as PlanItem & { parentTaskIndex?: number }).parentTaskIndex ?? src.originalIndex,
+
         durationMinutes: rounded,
         suggestedDay: "tomorrow" as const,
         isFixed: false,
