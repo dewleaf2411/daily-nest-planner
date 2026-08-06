@@ -1381,6 +1381,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     dragBreakRef.current = null;
     dragActiveRef.current = false;
     dropPosRef.current = null;
+    dragPosRef.current = null;
     setIsDraggingCard(false);
     setDropPos(null);
   };
