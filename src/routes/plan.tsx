@@ -1790,17 +1790,19 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
                 <ol className="mt-5 space-y-2.5">
-                  {scheduleWithMeta.map(({ entry, item }) => {
+                  {scheduleWithMeta.map(({ entry, item }, mapIndex) => {
                     if (entry.kind === "break") {
                       const isBreakEditing = editingBreak?.entryId === entry.id;
                       const actionsOpen = openBreakActions === entry.id;
                       return (
+                        <Fragment key={entry.id}>
+                        {renderDropZone(mapIndex)}
                         <li
-                          key={entry.id}
                           draggable={!isBreakEditing}
                           onDragStart={onBreakDragStart(entry)}
+                          onDragEnd={endDrag}
                           onDragOver={onDragOver}
-                          onDrop={onDropAtEntry(entry)}
+                          onDrop={onDropOnCard(mapIndex)}
                           onClick={() => setOpenBreakActions((current) => current === entry.id ? null : entry.id)}
                           className="group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4"
                         >
