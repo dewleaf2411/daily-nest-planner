@@ -1525,10 +1525,12 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       dropPosRef.current = null;
 
       const move = (moveEvent: PointerEvent) => {
+        pointerYRef.current = moveEvent.clientY;
         if (!dragActiveRef.current) {
           if (Math.abs(moveEvent.clientY - dragStartYRef.current) < 6) return;
           dragActiveRef.current = true;
           setIsDraggingCard(true);
+          startAutoScroll();
         }
         moveEvent.preventDefault();
         const pos = positionFromPointer(moveEvent.clientY);
