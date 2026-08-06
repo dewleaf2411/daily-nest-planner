@@ -1510,6 +1510,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     }
     return best.pos;
   };
+  positionFromPointerRef.current = positionFromPointer;
+
+
 
   const onCardPointerDown =
     (options: { pos: number; itemIndex?: number; breakEntry?: ScheduleEntry }) =>
