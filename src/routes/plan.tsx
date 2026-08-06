@@ -1372,6 +1372,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const dragStartYRef = useRef(0);
   const dragActiveRef = useRef(false);
   const dropPosRef = useRef<number | null>(null);
+  const dragPosRef = useRef<number | null>(null);
   const [isDraggingCard, setIsDraggingCard] = useState(false);
   const [dropPos, setDropPos] = useState<number | null>(null);
 
