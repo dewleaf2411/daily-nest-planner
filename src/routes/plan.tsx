@@ -1365,17 +1365,28 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
 
 
-  // Drag-and-drop for flexible today tasks
+  // Drag-and-drop for flexible today tasks and breaks
   const dragIdxRef = useRef<number | null>(null);
   const dragBreakRef = useRef<ScheduleEntry | null>(null);
+  const [isDraggingCard, setIsDraggingCard] = useState(false);
+  const [dropPos, setDropPos] = useState<number | null>(null);
+  const endDrag = () => {
+    dragIdxRef.current = null;
+    dragBreakRef.current = null;
+    setIsDraggingCard(false);
+    setDropPos(null);
+  };
   const onDragStart = (idx: number) => (e: React.DragEvent) => {
     dragBreakRef.current = null;
     dragIdxRef.current = idx;
+    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(idx));
   };
   const onBreakDragStart = (entry: ScheduleEntry) => (e: React.DragEvent) => {
     dragIdxRef.current = null;
     dragBreakRef.current = entry;
+    setIsDraggingCard(true);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", entry.id);
   };
@@ -1383,32 +1394,58 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-  const onDrop = (targetIdx: number) => (e: React.DragEvent) => {
+  const onZoneDragOver = (pos: number) => (e: React.DragEvent) => {
     e.preventDefault();
-    if (dragBreakRef.current) {
-      const target = schedule.find((entry) => entry.itemIndex === targetIdx);
-      if (target) relocateBreak(dragBreakRef.current, target.startMinutes);
-      dragBreakRef.current = null;
+    e.dataTransfer.dropEffect = "move";
+    setDropPos((current) => (current === pos ? current : pos));
+  };
+  // Drop into the gap at position `pos` (0 = before the first card)
+  const onDropAtPosition = (pos: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const brk = dragBreakRef.current;
+    const src = dragIdxRef.current;
+    endDrag();
+
+    if (brk) {
+      const after = scheduleWithMeta
+        .slice(pos)
+        .find((m) => m.entry.id !== brk.id);
+      const before = [...scheduleWithMeta.slice(0, pos)]
+        .reverse()
+        .find((m) => m.entry.id !== brk.id);
+      const startMinutes = after
+        ? after.entry.startMinutes
+        : before
+          ? before.entry.endMinutes
+          : brk.startMinutes;
+      if (startMinutes !== brk.startMinutes) relocateBreak(brk, startMinutes);
       return;
     }
-    const src = dragIdxRef.current;
-    dragIdxRef.current = null;
-    if (src === null || src === targetIdx) return;
+
+    if (src === null) return;
     const cur = [...order];
     const from = cur.indexOf(src);
-    const to = cur.indexOf(targetIdx);
-    if (from < 0 || to < 0) return;
-    cur.splice(to, 0, cur.splice(from, 1)[0]);
+    if (from < 0) return;
+    let targetIdx: number | null = null;
+    for (let i = pos; i < scheduleWithMeta.length; i++) {
+      const m = scheduleWithMeta[i];
+      if (m.entry.kind === "task" && m.item && m.item.originalIndex !== src) {
+        targetIdx = m.item.originalIndex;
+        break;
+      }
+    }
+    cur.splice(from, 1);
+    const to = targetIdx === null ? cur.length : cur.indexOf(targetIdx);
+    if (to < 0) return;
+    cur.splice(to, 0, src);
+    if (cur.every((value, index) => value === order[index])) return;
     pushHistory();
     setUserOrder(cur);
     flashStatus("Your order was kept and the timeline was rebuilt.");
   };
-  const onDropAtEntry = (target: ScheduleEntry) => (event: React.DragEvent) => {
-    if (!dragBreakRef.current) return;
-    event.preventDefault();
-    const source = dragBreakRef.current;
-    dragBreakRef.current = null;
-    if (source.id !== target.id) relocateBreak(source, target.startMinutes);
+  // Dropping directly on a card = drop just before that card
+  const onDropOnCard = (pos: number) => (e: React.DragEvent) => {
+    onDropAtPosition(pos)(e);
   };
 
   // Group schedule entries by task to render blocks together
