@@ -1375,6 +1375,14 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   const dragPosRef = useRef<number | null>(null);
   const [isDraggingCard, setIsDraggingCard] = useState(false);
   const [dropPos, setDropPos] = useState<number | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    html: string;
+    width: number;
+    className: string;
+  } | null>(null);
+  const [ghostPoint, setGhostPoint] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   // Auto-scroll the page while dragging near the top/bottom of the viewport
   const pointerYRef = useRef(0);
@@ -1430,6 +1438,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     stopAutoScroll();
     setIsDraggingCard(false);
     setDropPos(null);
+    setDragGhost(null);
+    setGhostPoint(null);
   };
 
   // Drop into the gap at position `pos` (0 = before the first card)
@@ -1486,7 +1496,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       list.querySelectorAll<HTMLElement>("[data-card-pos]"),
     );
     if (cards.length === 0) return null;
-    const from = dragPosRef.current;
+    
     const boundaries: { pos: number; y: number }[] = [];
     for (const card of cards) {
       const rect = card.getBoundingClientRect();
@@ -1497,10 +1507,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       pos: Number(cards[cards.length - 1].dataset.cardPos) + 1,
       y: lastRect.bottom,
     });
-    const usable =
-      from === null
-        ? boundaries
-        : boundaries.filter((b) => b.pos !== from && b.pos !== from + 1);
+    const usable = boundaries;
     if (usable.length === 0) return null;
     let best = usable[0];
     for (const candidate of usable) {
@@ -1527,15 +1534,33 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       dragActiveRef.current = false;
       dropPosRef.current = null;
 
+      const cardEl = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+        "[data-card-pos]",
+      );
+      const rect = cardEl?.getBoundingClientRect();
+      const grabOffsetX = rect ? event.clientX - rect.left : 0;
+      const grabOffsetY = rect ? event.clientY - rect.top : 0;
+
       const move = (moveEvent: PointerEvent) => {
         pointerYRef.current = moveEvent.clientY;
         if (!dragActiveRef.current) {
           if (Math.abs(moveEvent.clientY - dragStartYRef.current) < 6) return;
           dragActiveRef.current = true;
           setIsDraggingCard(true);
+          if (cardEl && rect) {
+            setDragGhost({
+              html: cardEl.innerHTML,
+              width: rect.width,
+              className: cardEl.className,
+            });
+          }
           startAutoScroll();
         }
         moveEvent.preventDefault();
+        setGhostPoint({
+          x: moveEvent.clientX - grabOffsetX,
+          y: moveEvent.clientY - grabOffsetY,
+        });
         const pos = positionFromPointer(moveEvent.clientY);
         dropPosRef.current = pos;
         setDropPos(pos);
@@ -1900,6 +1925,24 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
               {status && (
                 <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">{status}</div>
+              )}
+
+              {dragGhost && ghostPoint && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none fixed z-50 opacity-70"
+                  style={{
+                    left: ghostPoint.x,
+                    top: ghostPoint.y,
+                    width: dragGhost.width,
+                    transform: "rotate(-0.4deg) scale(1.01)",
+                  }}
+                >
+                  <div
+                    className={`${dragGhost.className} shadow-lg`}
+                    dangerouslySetInnerHTML={{ __html: dragGhost.html }}
+                  />
+                </div>
               )}
 
               {scheduleWithMeta.length === 0 ? (
