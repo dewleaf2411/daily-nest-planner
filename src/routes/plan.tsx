@@ -1524,15 +1524,33 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       dragActiveRef.current = false;
       dropPosRef.current = null;
 
+      const cardEl = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+        "[data-card-pos]",
+      );
+      const rect = cardEl?.getBoundingClientRect();
+      const grabOffsetX = rect ? event.clientX - rect.left : 0;
+      const grabOffsetY = rect ? event.clientY - rect.top : 0;
+
       const move = (moveEvent: PointerEvent) => {
         pointerYRef.current = moveEvent.clientY;
         if (!dragActiveRef.current) {
           if (Math.abs(moveEvent.clientY - dragStartYRef.current) < 6) return;
           dragActiveRef.current = true;
           setIsDraggingCard(true);
+          if (cardEl && rect) {
+            setDragGhost({
+              html: cardEl.innerHTML,
+              width: rect.width,
+              className: cardEl.className,
+            });
+          }
           startAutoScroll();
         }
         moveEvent.preventDefault();
+        setGhostPoint({
+          x: moveEvent.clientX - grabOffsetX,
+          y: moveEvent.clientY - grabOffsetY,
+        });
         const pos = positionFromPointer(moveEvent.clientY);
         dropPosRef.current = pos;
         setDropPos(pos);
