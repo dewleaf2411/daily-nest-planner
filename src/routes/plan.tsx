@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Clock, Calendar, GripVertical, Pencil, ArrowUp, ArrowDown, X, AlertCircle, Leaf, Heart, Sprout, FileText, ChevronDown, ArrowRight, Coffee, ChevronUp, Loader2, Check, Trash2 } from "lucide-react";
 import { planTasks } from "@/lib/planner.functions";
@@ -701,7 +701,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       const spillover: PlanItem & { parentTaskIndex: number } = {
         ...src,
         originalIndex: newIdx,
-        parentTaskIndex: src.parentTaskIndex ?? src.originalIndex,
+        parentTaskIndex:
+          (src as PlanItem & { parentTaskIndex?: number }).parentTaskIndex ?? src.originalIndex,
+
         durationMinutes: rounded,
         suggestedDay: "tomorrow" as const,
         isFixed: false,
@@ -1340,51 +1342,245 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
 
 
 
-  // Drag-and-drop for flexible today tasks
+  // Pointer-based drag & drop for flexible today tasks and breaks
+  const listRef = useRef<HTMLOListElement | null>(null);
   const dragIdxRef = useRef<number | null>(null);
   const dragBreakRef = useRef<ScheduleEntry | null>(null);
-  const onDragStart = (idx: number) => (e: React.DragEvent) => {
-    dragBreakRef.current = null;
-    dragIdxRef.current = idx;
-    e.dataTransfer.effectAllowed = "move";
+  const dragStartYRef = useRef(0);
+  const dragActiveRef = useRef(false);
+  const dropPosRef = useRef<number | null>(null);
+  const dragPosRef = useRef<number | null>(null);
+  const [isDraggingCard, setIsDraggingCard] = useState(false);
+  const [dropPos, setDropPos] = useState<number | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    html: string;
+    width: number;
+    className: string;
+  } | null>(null);
+  const [ghostPoint, setGhostPoint] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
+  // Auto-scroll the page while dragging near the top/bottom of the viewport
+  const pointerYRef = useRef(0);
+  const autoScrollRafRef = useRef<number | null>(null);
+  const positionFromPointerRef = useRef<(clientY: number) => number | null>(
+    () => null,
+  );
+
+  const stopAutoScroll = () => {
+    if (autoScrollRafRef.current !== null) {
+      cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }
   };
-  const onBreakDragStart = (entry: ScheduleEntry) => (e: React.DragEvent) => {
+
+  const startAutoScroll = () => {
+    if (autoScrollRafRef.current !== null) return;
+    const EDGE = 110; // px from the viewport edge where scrolling kicks in
+    const MAX_SPEED = 18; // px per frame at the very edge
+    const step = () => {
+      if (!dragActiveRef.current) {
+        autoScrollRafRef.current = null;
+        return;
+      }
+      const y = pointerYRef.current;
+      const height = window.innerHeight;
+      let delta = 0;
+      if (y < EDGE) delta = -MAX_SPEED * Math.min(1, (EDGE - y) / EDGE);
+      else if (y > height - EDGE)
+        delta = MAX_SPEED * Math.min(1, (y - (height - EDGE)) / EDGE);
+      if (delta !== 0) {
+        const before = window.scrollY;
+        window.scrollBy(0, delta);
+        if (window.scrollY !== before) {
+          const pos = positionFromPointerRef.current(y);
+          dropPosRef.current = pos;
+          setDropPos(pos);
+        }
+      }
+      autoScrollRafRef.current = requestAnimationFrame(step);
+    };
+    autoScrollRafRef.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => stopAutoScroll, []);
+
+  const endDrag = () => {
     dragIdxRef.current = null;
-    dragBreakRef.current = entry;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", entry.id);
+    dragBreakRef.current = null;
+    dragActiveRef.current = false;
+    dropPosRef.current = null;
+    dragPosRef.current = null;
+    stopAutoScroll();
+    setIsDraggingCard(false);
+    setDropPos(null);
+    setDragGhost(null);
+    setGhostPoint(null);
   };
-  const onDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  };
-  const onDrop = (targetIdx: number) => (e: React.DragEvent) => {
-    e.preventDefault();
-    if (dragBreakRef.current) {
-      const target = schedule.find((entry) => entry.itemIndex === targetIdx);
-      if (target) relocateBreak(dragBreakRef.current, target.startMinutes);
-      dragBreakRef.current = null;
+
+  // Drop into the gap at position `pos` (0 = before the first card)
+  const commitDrop = (pos: number) => {
+    const brk = dragBreakRef.current;
+    const src = dragIdxRef.current;
+
+    if (brk) {
+      const after = scheduleWithMeta
+        .slice(pos)
+        .find((m) => m.entry.id !== brk.id);
+      const before = [...scheduleWithMeta.slice(0, pos)]
+        .reverse()
+        .find((m) => m.entry.id !== brk.id);
+      const startMinutes = after
+        ? after.entry.startMinutes
+        : before
+          ? before.entry.endMinutes
+          : brk.startMinutes;
+      if (startMinutes !== brk.startMinutes) relocateBreak(brk, startMinutes);
       return;
     }
-    const src = dragIdxRef.current;
-    dragIdxRef.current = null;
-    if (src === null || src === targetIdx) return;
+
+    if (src === null) return;
     const cur = [...order];
     const from = cur.indexOf(src);
-    const to = cur.indexOf(targetIdx);
-    if (from < 0 || to < 0) return;
-    cur.splice(to, 0, cur.splice(from, 1)[0]);
+    if (from < 0) return;
+    let targetIdx: number | null = null;
+    for (let i = pos; i < scheduleWithMeta.length; i++) {
+      const m = scheduleWithMeta[i];
+      if (m.entry.kind === "task" && m.item && m.item.originalIndex !== src) {
+        targetIdx = m.item.originalIndex;
+        break;
+      }
+    }
+    cur.splice(from, 1);
+    const to = targetIdx === null ? cur.length : cur.indexOf(targetIdx);
+    if (to < 0) return;
+    cur.splice(to, 0, src);
+    if (cur.length === order.length && cur.every((value, index) => value === order[index])) return;
     pushHistory();
     setUserOrder(cur);
     flashStatus("Your order was kept and the timeline was rebuilt.");
   };
-  const onDropAtEntry = (target: ScheduleEntry) => (event: React.DragEvent) => {
-    if (!dragBreakRef.current) return;
-    event.preventDefault();
-    const source = dragBreakRef.current;
-    dragBreakRef.current = null;
-    if (source.id !== target.id) relocateBreak(source, target.startMinutes);
+  const commitDropRef = useRef(commitDrop);
+  commitDropRef.current = commitDrop;
+
+  // Snap to the nearest gap between cards, skipping the two positions that
+  // would leave the dragged card exactly where it already is.
+  const positionFromPointer = (clientY: number) => {
+    const list = listRef.current;
+    if (!list) return null;
+    const cards = Array.from(
+      list.querySelectorAll<HTMLElement>("[data-card-pos]"),
+    );
+    if (cards.length === 0) return null;
+    
+    const boundaries: { pos: number; y: number }[] = [];
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      boundaries.push({ pos: Number(card.dataset.cardPos), y: rect.top });
+    }
+    const lastRect = cards[cards.length - 1].getBoundingClientRect();
+    boundaries.push({
+      pos: Number(cards[cards.length - 1].dataset.cardPos) + 1,
+      y: lastRect.bottom,
+    });
+    const usable = boundaries;
+    if (usable.length === 0) return null;
+    let best = usable[0];
+    for (const candidate of usable) {
+      if (Math.abs(clientY - candidate.y) < Math.abs(clientY - best.y)) {
+        best = candidate;
+      }
+    }
+    return best.pos;
   };
+  positionFromPointerRef.current = positionFromPointer;
+
+
+
+  const onCardPointerDown =
+    (options: { pos: number; itemIndex?: number; breakEntry?: ScheduleEntry }) =>
+    (event: React.PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("button, input, textarea, select, a, [role='checkbox']")) return;
+      dragIdxRef.current = options.itemIndex ?? null;
+      dragBreakRef.current = options.breakEntry ?? null;
+      dragPosRef.current = options.pos;
+      dragStartYRef.current = event.clientY;
+      dragActiveRef.current = false;
+      dropPosRef.current = null;
+
+      const cardEl = (event.currentTarget as HTMLElement).closest<HTMLElement>(
+        "[data-card-pos]",
+      );
+      const rect = cardEl?.getBoundingClientRect();
+      const grabOffsetX = rect ? event.clientX - rect.left : 0;
+      const grabOffsetY = rect ? event.clientY - rect.top : 0;
+
+      const move = (moveEvent: PointerEvent) => {
+        pointerYRef.current = moveEvent.clientY;
+        if (!dragActiveRef.current) {
+          if (Math.abs(moveEvent.clientY - dragStartYRef.current) < 6) return;
+          dragActiveRef.current = true;
+          setIsDraggingCard(true);
+          if (cardEl && rect) {
+            setDragGhost({
+              html: cardEl.innerHTML,
+              width: rect.width,
+              className: cardEl.className,
+            });
+          }
+          startAutoScroll();
+        }
+        moveEvent.preventDefault();
+        setGhostPoint({
+          x: moveEvent.clientX - grabOffsetX,
+          y: moveEvent.clientY - grabOffsetY,
+        });
+        const pos = positionFromPointer(moveEvent.clientY);
+        dropPosRef.current = pos;
+        setDropPos(pos);
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        const wasActive = dragActiveRef.current;
+        const pos = dropPosRef.current;
+        if (wasActive && pos !== null) commitDropRef.current(pos);
+        endDrag();
+      };
+      window.addEventListener("pointermove", move, { passive: false });
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    };
+
+  const renderDropZone = (pos: number) => {
+    const active = isDraggingCard && dropPos === pos;
+    return (
+      <li
+        key={`drop-zone-${pos}`}
+        aria-hidden
+        className={`pointer-events-none relative list-none transition-all duration-150 ${isDraggingCard ? (active ? "h-9 -my-1" : "h-4 -my-1") : "h-0"}`}
+      >
+        {isDraggingCard && (
+          <span className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center">
+            {active ? (
+              <>
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+                <span className="h-[3px] flex-1 rounded-full bg-primary shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_18%,transparent)]" />
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+              </>
+            ) : (
+              <span className="h-px flex-1 rounded-full border-t border-dashed border-primary/25" />
+            )}
+          </span>
+        )}
+      </li>
+    );
+  };
+
 
   // Group schedule entries by task to render blocks together
   const scheduleWithMeta = schedule.map((s) => {
@@ -1708,23 +1904,40 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                 <div className="mt-3 rounded-md bg-accent px-3 py-2 text-xs text-accent-foreground">{status}</div>
               )}
 
+              {dragGhost && ghostPoint && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none fixed z-50 opacity-70"
+                  style={{
+                    left: ghostPoint.x,
+                    top: ghostPoint.y,
+                    width: dragGhost.width,
+                    transform: "rotate(-0.4deg) scale(1.01)",
+                  }}
+                >
+                  <div
+                    className={`${dragGhost.className} shadow-lg`}
+                    dangerouslySetInnerHTML={{ __html: dragGhost.html }}
+                  />
+                </div>
+              )}
+
               {scheduleWithMeta.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">Nothing fits before your cutoff — review the conflict summary or Tomorrow below.</p>
               ) : (
-                <ol className="mt-5 space-y-2.5">
-                  {scheduleWithMeta.map(({ entry, item }) => {
+                <ol ref={listRef} className="mt-5 space-y-2.5">
+                  {scheduleWithMeta.map(({ entry, item }, mapIndex) => {
                     if (entry.kind === "break") {
                       const isBreakEditing = editingBreak?.entryId === entry.id;
                       const actionsOpen = openBreakActions === entry.id;
                       return (
+                        <Fragment key={entry.id}>
+                        {renderDropZone(mapIndex)}
                         <li
-                          key={entry.id}
-                          draggable={!isBreakEditing}
-                          onDragStart={onBreakDragStart(entry)}
-                          onDragOver={onDragOver}
-                          onDrop={onDropAtEntry(entry)}
-                          onClick={() => setOpenBreakActions((current) => current === entry.id ? null : entry.id)}
-                          className="group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4"
+                          data-card-pos={mapIndex}
+                          onPointerDown={isBreakEditing ? undefined : onCardPointerDown({ pos: mapIndex, breakEntry: entry })}
+                          onClick={() => { if (!isDraggingCard) setOpenBreakActions((current) => current === entry.id ? null : entry.id); }}
+                          className={`group rounded-xl border border-border/60 bg-secondary/40 px-3 py-2.5 sm:px-4 ${isBreakEditing ? "" : "cursor-grab touch-none select-none"} ${isDraggingCard && dragBreakRef.current?.id === entry.id ? "opacity-50" : ""}`}
                         >
                           <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
                             <div className="flex items-center gap-1 text-primary">
@@ -1753,7 +1966,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           {isBreakEditing && editingBreak && (
                             <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]" onClick={(event) => event.stopPropagation()}>
                               <input value={editingBreak.title} onChange={(event) => setEditingBreak({ ...editingBreak, title: event.target.value })} aria-label="Break name" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
-                              <input type="time" value={editingBreak.startTime} onChange={(event) => setEditingBreak({ ...editingBreak, startTime: event.target.value })} aria-label="Break start time" className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm" />
+                              <div className="w-[150px]"><WheelTimePicker value={editingBreak.startTime} onChange={(v) => setEditingBreak({ ...editingBreak, startTime: v })} ariaLabel="Break start time" /></div>
                               <label className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <input type="number" min={5} step={5} value={editingBreak.durationMinutes} onChange={(event) => setEditingBreak({ ...editingBreak, durationMinutes: parseInt(event.target.value, 10) || 5 })} aria-label="Break duration in minutes" className="w-16 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground" />
                                 min
@@ -1765,19 +1978,19 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                             </div>
                           )}
                         </li>
+                        </Fragment>
                       );
                     }
                     const isEditing = item && editingIdx === item.originalIndex;
                     const isFlexible = entry.kind === "task";
                     return (
+                      <Fragment key={entry.id}>
+                      {renderDropZone(mapIndex)}
                       <li
                         id={item && (entry.kind === "fixed" || entry.isFirstBlock) ? `plan-item-${item.originalIndex}` : undefined}
-                        key={entry.id}
-                        draggable={isFlexible && !isEditing}
-                        onDragStart={isFlexible && item ? onDragStart(item.originalIndex) : undefined}
-                        onDragOver={onDragOver}
-                        onDrop={item ? onDrop(item.originalIndex) : onDropAtEntry(entry)}
-                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""}`}
+                        data-card-pos={mapIndex}
+                        onPointerDown={isFlexible && item && !isEditing ? onCardPointerDown({ pos: mapIndex, itemIndex: item.originalIndex }) : undefined}
+                        className={`group rounded-xl border border-border bg-card p-3 sm:p-4 transition-colors ${isFlexible && !isEditing ? "cursor-grab touch-none select-none" : ""} ${item && completedTasks.has(item.originalIndex) ? "bg-secondary/40 border-border/60" : ""} ${isDraggingCard && item && dragIdxRef.current === item.originalIndex ? "opacity-50" : ""}`}
                       >
                         <div className={`flex items-start gap-3 sm:gap-4 ${item && completedTasks.has(item.originalIndex) ? "opacity-60" : ""}`}>
                           <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
@@ -1834,21 +2047,22 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                                   <div className="flex flex-col gap-2 sm:flex-row">
                                     <div className="flex-1">
                                       <label className="block text-xs font-medium text-muted-foreground">Starts at</label>
-                                      <input
-                                        type="time"
+                                      <WheelTimePicker
                                         value={editForm.fixedStart}
-                                        onChange={(e) => setEditForm({ ...editForm, fixedStart: e.target.value })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                        onChange={(v) => setEditForm({ ...editForm, fixedStart: v })}
+                                        ariaLabel="Starts at"
+                                        className="mt-1"
                                       />
                                     </div>
                                     <div className="flex-1">
                                       <label className="block text-xs font-medium text-muted-foreground">Ends at</label>
-                                      <input
-                                        type="time"
+                                      <WheelTimePicker
                                         value={editForm.fixedEnd}
-                                        onChange={(e) => setEditForm({ ...editForm, fixedEnd: e.target.value })}
-                                        className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                        onChange={(v) => setEditForm({ ...editForm, fixedEnd: v })}
+                                        ariaLabel="Ends at"
+                                        className="mt-1"
                                       />
+
                                     </div>
                                   </div>
                                 )}
@@ -1956,8 +2170,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           </div>
                         </div>
                       </li>
+                      </Fragment>
                     );
                   })}
+                  {renderDropZone(scheduleWithMeta.length)}
                 </ol>
               )}
 
