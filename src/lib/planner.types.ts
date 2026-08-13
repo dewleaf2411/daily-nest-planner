@@ -15,6 +15,7 @@ export interface PlanItem {
   dueDate?: string | null;
   dueLabel?: string | null;
   dueCategory: DueCategory;
+  /** Canonical day on which this task is planned to be worked; independent of its due date. */
   suggestedDay: SuggestedDay;
   isFixed: boolean;
   fixedStart?: string | null;

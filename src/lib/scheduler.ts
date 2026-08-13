@@ -207,7 +207,7 @@ export function buildSchedule({
     ) {
       addTomorrow(
         item,
-        item.remainingDurationMinutes ?? item.durationMinutes,
+        item.durationMinutes,
         item.dueCategory === "today" ? "Couldn't fit today" : item.note ?? undefined,
       );
     }
@@ -521,9 +521,10 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
     const item = items.find((candidate) => candidate.originalIndex === index);
     return item?.requiredToday || item?.dueCategory === "today";
   });
-  const seen = new Set(
+  const explicitOrder = [...new Set(
     userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
-  );
+  )];
+  const seen = new Set(explicitOrder);
   const rest = flexToday
     .filter((index) => !seen.has(index) && !importantToday.includes(index))
     .sort((a, b) => {
@@ -533,7 +534,7 @@ export function computeOrder(items: PlanItem[], userOrder: number[]): number[] {
     });
   return [
     ...importantToday,
-    ...userOrder.filter((index) => flexToday.includes(index) && !importantToday.includes(index)),
+    ...explicitOrder,
     ...rest,
   ];
 }

@@ -16,6 +16,7 @@ import { ProfileMenu } from "@/components/ProfileMenu";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
 import { lovable } from "@/integrations/lovable/index";
 import { deleteTaskFromPlanState } from "@/lib/task-delete";
+import { moveTaskToDay } from "@/lib/task-move";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
@@ -630,21 +631,11 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
   };
 
   const moveToTomorrow = (idx: number) => {
+    if (!items) return;
     pushHistory();
-    updateItems((prev) =>
-      prev.map((it) =>
-        it.originalIndex === idx
-          ? {
-              ...it,
-              suggestedDay: "tomorrow" as const,
-              deferredByUser: true,
-              todayDurationMinutes: 0,
-              remainingDurationMinutes: it.durationMinutes,
-            }
-          : it,
-      ),
-    );
-    setUserOrder((o) => o.filter((i) => i !== idx));
+    const next = moveTaskToDay({ items, userOrder }, idx, "tomorrow");
+    setItems(next.items);
+    setUserOrder(next.userOrder);
     setEditingIdx(null);
     flashStatus("Moved to Tomorrow.");
   };
@@ -653,34 +644,20 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (!items) return;
     const it = items.find((i) => i.originalIndex === idx);
     if (!it) return;
-    const moveToday = (item: PlanItem) =>
-      item.originalIndex === idx
-        ? {
-            ...item,
-            suggestedDay: "today" as const,
-            deferredByUser: false,
-            todayDurationMinutes: item.durationMinutes,
-            remainingDurationMinutes: 0,
-          }
-        : item;
+    const next = moveTaskToDay({ items, userOrder }, idx, "today");
     // check how much free time there is
     const test = buildSchedule({
-      items: items.map(moveToday),
-      order: computeOrder(
-        items.map(moveToday),
-        [...userOrder, idx],
-      ),
+      items: next.items,
+      order: computeOrder(next.items, next.userOrder),
       nowMinutes,
       cutoffMinutes,
     });
     const scheduledForTask = test.schedule
       .filter((entry) => entry.kind === "task" && entry.itemIndex === idx)
       .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
-    const needMin = it.durationMinutes;
-    const availableMin = Math.max(0, cutoffMinutes - Math.max(nowMinutes, 0));
     pushHistory();
-    updateItems((prev) => prev.map(moveToday));
-    setUserOrder((o) => [...o, idx]);
+    setItems(next.items);
+    setUserOrder(next.userOrder);
     if (scheduledForTask < it.durationMinutes) {
       flashStatus("Moved to Today — some of it may not fit before your available-until time.");
     } else {
