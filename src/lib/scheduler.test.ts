@@ -375,6 +375,78 @@ describe("required-today planning", () => {
 });
 
 describe("break scheduling", () => {
+  it("never overlaps two flexible tasks", () => {
+    const items = [
+      task({ originalIndex: 0, title: "First task", durationMinutes: 45 }),
+      task({ originalIndex: 1, title: "Second task", durationMinutes: 45 }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, [0, 1]),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+    const taskBlocks = result.schedule.filter((entry) => entry.kind === "task");
+
+    expect(taskBlocks).toEqual([
+      expect.objectContaining({ itemIndex: 0, startMinutes: 10 * 60, endMinutes: 10 * 60 + 45 }),
+      expect.objectContaining({ itemIndex: 1, startMinutes: 10 * 60 + 45, endMinutes: 11 * 60 + 30 }),
+    ]);
+    expect(taskBlocks[1].startMinutes).toBeGreaterThanOrEqual(taskBlocks[0].endMinutes);
+  });
+
+  it("keeps a flexible task outside a fixed commitment", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Flexible task", durationMinutes: 60 }),
+      task({
+        originalIndex: 1,
+        title: "Appointment",
+        durationMinutes: 30,
+        isFixed: true,
+        fixedStart: "10:30",
+        fixedEnd: "11:00",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, [0]),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+    const flexibleBlocks = result.schedule.filter((entry) => entry.itemIndex === 0);
+
+    expect(flexibleBlocks).toEqual([
+      expect.objectContaining({ startMinutes: 10 * 60, endMinutes: 10 * 60 + 30 }),
+      expect.objectContaining({ startMinutes: 11 * 60, endMinutes: 11 * 60 + 30 }),
+    ]);
+  });
+
+  it("keeps a flexible task outside an explicit break", () => {
+    const items = [
+      task({ originalIndex: 0, title: "Flexible task", durationMinutes: 60 }),
+      task({
+        originalIndex: 1,
+        itemType: "break",
+        title: "Lunch break",
+        durationMinutes: 15,
+        reason: "Manual break",
+        fixedStart: "10:30",
+      }),
+    ];
+    const result = buildSchedule({
+      items,
+      order: computeOrder(items, [0]),
+      nowMinutes: 10 * 60,
+      cutoffMinutes: 12 * 60,
+    });
+    const flexibleBlocks = result.schedule.filter((entry) => entry.itemIndex === 0);
+
+    expect(flexibleBlocks).toEqual([
+      expect.objectContaining({ startMinutes: 10 * 60, endMinutes: 10 * 60 + 30 }),
+      expect.objectContaining({ startMinutes: 10 * 60 + 45, endMinutes: 11 * 60 + 15 }),
+    ]);
+  });
+
   it("keeps an explicit break out of task and fixed-commitment metadata", () => {
     const items = [
       task({ originalIndex: 0, durationMinutes: 60 }),

@@ -17,6 +17,7 @@ import { WheelTimePicker } from "@/components/WheelTimePicker";
 import { lovable } from "@/integrations/lovable/index";
 import { deleteTaskFromPlanState } from "@/lib/task-delete";
 import { moveTaskToDay } from "@/lib/task-move";
+import { conflictPresentationKey } from "@/lib/conflict-flow";
 
 export const Route = createFileRoute("/plan")({
   component: PlanRoute,
@@ -374,6 +375,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (!items) return { schedule: [], tomorrow: [], conflicts: [], scheduledMinutes: 0 };
     return buildSchedule({ items, order, nowMinutes, cutoffMinutes, suppressedBreakIds });
   }, [items, order, nowMinutes, cutoffMinutes, suppressedBreakIds]);
+  const currentConflictKey = useMemo(
+    () => conflictPresentationKey(conflicts),
+    [conflicts],
+  );
 
   const roomContext = useMemo(
     () =>
@@ -396,18 +401,18 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     if (
       !items ||
       loading ||
-      conflicts.length === 0 ||
+      !currentConflictKey ||
       crowded ||
       fullDayFlow ||
       showGuestCard ||
       confirmNewPlan ||
-      presentedConflictKeyRef.current === "shown"
+      presentedConflictKeyRef.current === currentConflictKey
     ) {
       return;
     }
-    presentedConflictKeyRef.current = "shown";
+    presentedConflictKeyRef.current = currentConflictKey;
     setShowConflictModal(true);
-  }, [conflicts.length, confirmNewPlan, crowded, fullDayFlow, items, loading, showGuestCard]);
+  }, [confirmNewPlan, crowded, currentConflictKey, fullDayFlow, items, loading, showGuestCard]);
 
   const pushHistory = () => {
     if (items) historyRef.current = { items: items.map((i) => ({ ...i })), order: [...order], availableUntil, suppressedBreakIds: [...suppressedBreakIds] };
@@ -545,6 +550,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       return;
     }
     pushHistory();
+    presentedConflictKeyRef.current = "";
     updateItems((prev) =>
       prev.map((it) => {
         if (it.originalIndex !== editingIdx) return it;
@@ -659,7 +665,16 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     setItems(next.items);
     setUserOrder(next.userOrder);
     if (scheduledForTask < it.durationMinutes) {
-      flashStatus("Moved to Today — some of it may not fit before your available-until time.");
+      setFullDayFlow({
+        taskIndex: idx,
+        stage: "notice",
+        adjustment: null,
+        previewFrom: "suggestions",
+        manualTargetIndex: null,
+        manualKeepMinutes: Math.max(5, scheduledForTask),
+        message: null,
+      });
+      flashStatus("Moved to Today — review how the remaining time should be handled.");
     } else {
       flashStatus("Moved to Today.");
     }
@@ -2473,6 +2488,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
           ? selectedManualMinutes - fullDayFlow.manualKeepMinutes
           : 0;
         const exactMinutesNeeded = roomContext ? getRoomMinutesNeeded(roomContext) : newTask.durationMinutes;
+        const potentialTodayMinutes = Math.max(0, newTask.durationMinutes - exactMinutesNeeded);
         const manualAdjustment =
           selectedManualTask && manualKeepIsValid
             ? ({
@@ -2515,7 +2531,9 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     Today is already full
                   </h3>
                   <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
-                    “{newTask.title}” was placed tomorrow because there isn’t enough realistic time left today.
+                    {potentialTodayMinutes > 0
+                      ? `Only ${formatDuration(potentialTodayMinutes)} of ${formatDuration(newTask.durationMinutes)} fits before ${cutoffLabel}. The remaining ${formatDuration(exactMinutesNeeded)} still needs a clear place.`
+                      : `“${newTask.title}” cannot fit before ${cutoffLabel}. It is still visible in Tomorrow and no work minutes were removed.`}
                   </p>
                   <div className="mt-6 space-y-2">
                     <button
@@ -2523,7 +2541,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       onClick={closeFullDayFlow}
                       className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                     >
-                      Keep it tomorrow
+                      {newTask.suggestedDay === "tomorrow" ? "Keep it tomorrow" : "Keep current placement"}
                     </button>
                     <button
                       type="button"
@@ -2568,23 +2586,58 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                     </button>
                   </div>
                   <div className="mt-8 space-y-3">
-                    {exactMinutesNeeded > 0 &&
-                      cutoffMinutes + exactMinutesNeeded <= 23 * 60 + 59 && (
+                    {exactMinutesNeeded > 0 && cutoffMinutes + 15 <= 23 * 60 + 59 && (
                         <button
                           type="button"
                           onClick={() =>
                             selectRoomAdjustment(
-                              { kind: "extend", minutes: exactMinutesNeeded },
+                              exactMinutesNeeded <= 15
+                                ? { kind: "extend", minutes: 15 }
+                                : [
+                                    { kind: "extend", minutes: 15 },
+                                    {
+                                      kind: "start",
+                                      sessionMinutes: Math.min(
+                                        newTask.durationMinutes - 1,
+                                        potentialTodayMinutes + 15,
+                                      ),
+                                    },
+                                  ],
                               "suggestions",
                             )
                           }
                           className="w-full rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent/60"
                         >
                           <span className="block text-sm font-medium text-foreground">
-                            Extend today by {exactMinutesNeeded} min
+                            Available time +15 min
+                          </span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            Move today&apos;s stop time 15 minutes later and rebuild the schedule.
+                            {exactMinutesNeeded > 15
+                              ? ` ${formatDuration(exactMinutesNeeded - 15)} will continue in Tomorrow.`
+                              : ""}
                           </span>
                         </button>
                       )}
+                    {potentialTodayMinutes >= 5 && potentialTodayMinutes < newTask.durationMinutes && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectRoomAdjustment(
+                            { kind: "start", sessionMinutes: potentialTodayMinutes },
+                            "suggestions",
+                          )
+                        }
+                        className="w-full rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent/60"
+                      >
+                        <span className="block text-sm font-medium text-foreground">
+                          Shorten “{newTask.title}” today
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Keep {formatDuration(potentialTodayMinutes)} today; continue {formatDuration(exactMinutesNeeded)} in Tomorrow. The due date stays unchanged.
+                        </span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() =>
@@ -2595,7 +2648,10 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       className="w-full rounded-2xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent/60"
                     >
                       <span className="block text-sm font-medium text-foreground">
-                        Choose a task to adjust
+                        Choose an event to move
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Choose flexible work to move or shorten. Fixed commitments stay in place.
                       </span>
                     </button>
                   </div>
@@ -2610,7 +2666,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         Make room
                       </h3>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        Pick a task to move or shorten.
+                        Pick flexible work to move or shorten. Fixed commitments cannot be moved.
                       </p>
                     </div>
                     <button
@@ -2807,7 +2863,8 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                           {impact.kind === "move" && `Move ${impact.title} to tomorrow`}
                           {impact.kind === "remove" && `Remove ${impact.title} from today`}
                           {impact.kind === "extend" && `Extend today by ${formatDuration(impact.minutesFreed)}`}
-                          {impact.kind === "start" && `Add ${impact.title} today`}
+                          {impact.kind === "start" &&
+                            `${impact.title}: ${formatDuration(impact.afterMinutes)} today, ${formatDuration(Math.max(0, newTask.durationMinutes - impact.afterMinutes))} continues Tomorrow`}
                         </li>
                       ))}
                     </ul>
@@ -3035,7 +3092,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                             Also, {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            They&apos;ve been moved to Tomorrow — scroll down to edit them.
+                            No work was deleted. Review the affected tasks to decide what stays Today and what continues Tomorrow.
                           </p>
                           {affectedRows.length > 0 && (
                             <div className="mt-2">
@@ -3073,7 +3130,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                       {formatDuration(totalUnfit)} of tasks could not fit before {cutoffLabel}.
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      They&apos;ve been moved to Tomorrow — scroll down to edit them.
+                      No work was deleted. Review the affected tasks to decide what stays Today and what continues Tomorrow.
                     </p>
                     {affectedRows.length > 0 && (
                       <div className="mt-2">

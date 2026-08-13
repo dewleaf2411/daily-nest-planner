@@ -129,6 +129,85 @@ describe("full day make-room flow", () => {
     );
   });
 
+  it("shortens a 60-minute selected task to 45 today and carries 15 to Tomorrow", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Selected task",
+        durationMinutes: 60,
+        suggestedDay: "tomorrow",
+        dueDate: "2026-08-13",
+        dueCategory: "tomorrow",
+        dueLabel: "Due tomorrow",
+      }),
+    ];
+    const preview = previewRoomAdjustment(
+      { items, order: [], newTaskIndex: 0, nowMinutes: 18 * 60, cutoffMinutes: 18 * 60 + 45 },
+      { kind: "start", sessionMinutes: 45 },
+    );
+    const selectedTask = preview?.items.find((item) => item.originalIndex === 0);
+    const todayMinutes = preview?.result.schedule
+      .filter((entry) => entry.itemIndex === 0)
+      .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
+    const tomorrowMinutes = preview?.result.tomorrow.find(
+      (entry) => entry.itemIndex === 0,
+    )?.remainingMinutes;
+
+    expect(todayMinutes).toBe(45);
+    expect(tomorrowMinutes).toBe(15);
+    expect((todayMinutes ?? 0) + (tomorrowMinutes ?? 0)).toBe(60);
+    expect(selectedTask?.durationMinutes).toBe(60);
+    expect(selectedTask?.dueDate).toBe("2026-08-13");
+    expect(preview?.items.filter((item) => item.originalIndex === 0)).toHaveLength(1);
+  });
+
+  it("adds 15 available minutes without overlaps and preserves the remaining work", () => {
+    const items = [
+      task({
+        originalIndex: 0,
+        title: "Appointment",
+        durationMinutes: 60,
+        isFixed: true,
+        fixedStart: "18:00",
+        fixedEnd: "19:00",
+      }),
+      task({
+        originalIndex: 1,
+        title: "Selected task",
+        durationMinutes: 60,
+        suggestedDay: "tomorrow",
+        dueDate: "2026-08-13",
+        dueCategory: "tomorrow",
+      }),
+    ];
+    const preview = previewRoomAdjustments(
+      { items, order: [], newTaskIndex: 1, nowMinutes: 18 * 60, cutoffMinutes: 19 * 60 },
+      [
+        { kind: "extend", minutes: 15 },
+        { kind: "start", sessionMinutes: 15 },
+      ],
+    );
+    const blocks = [...(preview?.result.schedule ?? [])].sort(
+      (first, second) => first.startMinutes - second.startMinutes,
+    );
+    const todayMinutes = blocks
+      .filter((entry) => entry.itemIndex === 1)
+      .reduce((total, entry) => total + entry.endMinutes - entry.startMinutes, 0);
+    const tomorrowMinutes = preview?.result.tomorrow.find(
+      (entry) => entry.itemIndex === 1,
+    )?.remainingMinutes;
+
+    expect(preview?.cutoffMinutes).toBe(19 * 60 + 15);
+    expect(preview?.enoughRoom).toBe(true);
+    expect(todayMinutes).toBe(15);
+    expect(tomorrowMinutes).toBe(45);
+    expect(todayMinutes + (tomorrowMinutes ?? 0)).toBe(60);
+    expect(preview?.items.find((item) => item.originalIndex === 1)?.dueDate).toBe("2026-08-13");
+    for (let index = 1; index < blocks.length; index += 1) {
+      expect(blocks[index].startMinutes).toBeGreaterThanOrEqual(blocks[index - 1].endMinutes);
+    }
+  });
+
   it("moving a 90-minute task creates enough room", () => {
     const items = [
       task({ originalIndex: 0, title: "Chemistry worksheet", durationMinutes: 90 }),
