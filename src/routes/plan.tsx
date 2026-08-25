@@ -16,6 +16,7 @@ import { ProfileMenu } from "@/components/ProfileMenu";
 import { WheelTimePicker } from "@/components/WheelTimePicker";
 import { lovable } from "@/integrations/lovable/index";
 import { deleteTaskFromPlanState } from "@/lib/task-delete";
+import { getSameDayBreakInsertionStart } from "@/lib/reorder";
 import { moveTaskToDay } from "@/lib/task-move";
 import { conflictPresentationKey } from "@/lib/conflict-flow";
 
@@ -1446,11 +1447,29 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
       const before = [...scheduleWithMeta.slice(0, pos)]
         .reverse()
         .find((m) => m.entry.id !== brk.id);
-      const startMinutes = after
-        ? after.entry.startMinutes
-        : before
-          ? before.entry.endMinutes
-          : brk.startMinutes;
+      const rebuiltStartMinutes = items
+        ? getSameDayBreakInsertionStart({
+            items,
+            userOrder,
+            sourceEntryId: brk.id,
+            sourceItemIndex: brk.itemIndex,
+            beforeEntryId: after?.entry.id ?? null,
+            beforeTaskId:
+              after?.entry.kind === "task" && after.item
+                ? after.item.originalIndex
+                : null,
+            nowMinutes,
+            cutoffMinutes,
+            suppressedBreakIds,
+          })
+        : null;
+      const startMinutes =
+        rebuiltStartMinutes ??
+        (after
+          ? after.entry.startMinutes
+          : before
+            ? before.entry.endMinutes
+            : brk.startMinutes);
       if (startMinutes !== brk.startMinutes) relocateBreak(brk, startMinutes);
       return;
     }
