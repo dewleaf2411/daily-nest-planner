@@ -1356,6 +1356,15 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
     flashStatus("Break skipped.");
   };
 
+  const cancelPendingBreak = () => {
+    if (!breakRoomFlow) return;
+    const wasExistingBreak = breakRoomFlow.sourceEntryId !== null;
+    setBreakRoomFlow(null);
+    setEditingBreak(null);
+    setOpenBreakActions(null);
+    flashStatus(wasExistingBreak ? "Break move canceled." : "Break not added.");
+  };
+
 
 
   // Pointer-based drag & drop for flexible today tasks and breaks
@@ -2963,7 +2972,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   Your plan needs {formatDuration(breakRoomFlow.neededMinutes)} more. Choose one adjustment and DailyNest will place the break automatically.
                 </p>
               </div>
-              <button type="button" onClick={skipPendingBreak} aria-label="Close and skip this break" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
+              <button type="button" onClick={cancelPendingBreak} aria-label="Close and keep this break" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
                 <X className="h-4 w-4" />
               </button>
             </div>

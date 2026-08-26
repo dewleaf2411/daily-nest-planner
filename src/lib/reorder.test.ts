@@ -91,6 +91,45 @@ describe("same-day schedule reordering", () => {
     expect(after.schedule.map((entry) => entry.title)).toEqual(["Gym", "Eat", "Break"]);
   });
 
+  it("moves an existing 30-minute break without asking for 30 more minutes", () => {
+    const items = [
+      task({ originalIndex: 10, title: "Gym" }),
+      task({
+        originalIndex: 20,
+        itemType: "break",
+        title: "Break",
+        durationMinutes: 30,
+        fixedStart: "09:10",
+      }),
+      task({ originalIndex: 30, title: "Eat" }),
+    ];
+    const breakStart = getSameDayBreakInsertionStart({
+      items,
+      userOrder: [10, 30],
+      sourceEntryId: "break-20",
+      sourceItemIndex: 20,
+      beforeEntryId: null,
+      beforeTaskId: null,
+      nowMinutes,
+      cutoffMinutes: 9 * 60 + 50,
+    });
+    const movedItems = items.map((item) =>
+      item.originalIndex === 20 ? { ...item, fixedStart: "09:20" } : item,
+    );
+    const result = buildSchedule({
+      items: movedItems,
+      order: computeOrder(movedItems, [10, 30]),
+      nowMinutes,
+      cutoffMinutes: 9 * 60 + 50,
+    });
+
+    expect(breakStart).toBe(9 * 60 + 20);
+    expect(result.schedule.map((entry) => entry.title)).toEqual(["Gym", "Eat", "Break"]);
+    expect(duration(result.schedule)).toBe(50);
+    expect(result.tomorrow).toHaveLength(0);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
   it("preserves every block ID and exact duration", () => {
     const { items, movedItems, before, after } = reorderedSchedule();
     const signatures = (entries: ScheduleEntry[]) =>
@@ -173,5 +212,47 @@ describe("same-day schedule reordering", () => {
       expect.objectContaining({ originalIndex: 10, durationMinutes: 10, suggestedDay: "today" }),
     );
     expect(today.userOrder).toEqual([10]);
+  });
+
+  it("does not count an existing generated break again when it moves later", () => {
+    const items = [
+      task({ originalIndex: 10, title: "Gym" }),
+      task({
+        originalIndex: 20,
+        title: "Fixed commitment",
+        isFixed: true,
+        fixedStart: "09:40",
+        fixedEnd: "09:50",
+      }),
+    ];
+    const baseline = buildSchedule({
+      items,
+      order: computeOrder(items, [10]),
+      nowMinutes,
+      cutoffMinutes: 9 * 60 + 50,
+    });
+    const generatedBreak = baseline.schedule.find(
+      (entry) => entry.id === "gap-550-580",
+    );
+
+    expect(generatedBreak).toEqual(
+      expect.objectContaining({
+        kind: "break",
+        startMinutes: 9 * 60 + 10,
+        endMinutes: 9 * 60 + 40,
+      }),
+    );
+    expect(
+      getSameDayBreakInsertionStart({
+        items,
+        userOrder: [10],
+        sourceEntryId: generatedBreak!.id,
+        sourceItemIndex: -1,
+        beforeEntryId: "fixed-20",
+        beforeTaskId: null,
+        nowMinutes,
+        cutoffMinutes: 9 * 60 + 50,
+      }),
+    ).toBe(9 * 60 + 10);
   });
 });

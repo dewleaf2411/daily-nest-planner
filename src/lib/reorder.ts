@@ -25,6 +25,17 @@ export function getSameDayBreakInsertionStart({
   cutoffMinutes,
   suppressedBreakIds = [],
 }: SameDayBreakInsertionOptions): number | null {
+  const baseline = buildSchedule({
+    items,
+    order: computeOrder(items, userOrder),
+    nowMinutes,
+    cutoffMinutes,
+    suppressedBreakIds,
+  });
+  const generatedSource =
+    sourceItemIndex < 0
+      ? baseline.schedule.find((entry) => entry.id === sourceEntryId)
+      : null;
   const itemsWithoutSource =
     sourceItemIndex >= 0
       ? items.filter((item) => item.originalIndex !== sourceItemIndex)
@@ -41,10 +52,17 @@ export function getSameDayBreakInsertionStart({
     suppressedBreakIds: suppressedWithoutSource,
   });
 
+  const removeGeneratedSourceDuration = (startMinutes: number) => {
+    if (!generatedSource || startMinutes < generatedSource.endMinutes) {
+      return startMinutes;
+    }
+    return startMinutes - (generatedSource.endMinutes - generatedSource.startMinutes);
+  };
+
   const beforeEntry = beforeEntryId
     ? sourceFree.schedule.find((entry) => entry.id === beforeEntryId)
     : null;
-  if (beforeEntry) return beforeEntry.startMinutes;
+  if (beforeEntry) return removeGeneratedSourceDuration(beforeEntry.startMinutes);
 
   const beforeTask =
     beforeTaskId === null
@@ -52,11 +70,12 @@ export function getSameDayBreakInsertionStart({
       : sourceFree.schedule.find(
           (entry) => entry.kind === "task" && entry.itemIndex === beforeTaskId,
         );
-  if (beforeTask) return beforeTask.startMinutes;
+  if (beforeTask) return removeGeneratedSourceDuration(beforeTask.startMinutes);
 
   if (beforeEntryId !== null || beforeTaskId !== null) return null;
-  return sourceFree.schedule.reduce(
+  const endMinutes = sourceFree.schedule.reduce(
     (latest, entry) => Math.max(latest, entry.endMinutes),
     Math.ceil(Math.max(0, nowMinutes) / 5) * 5,
   );
+  return removeGeneratedSourceDuration(endMinutes);
 }
