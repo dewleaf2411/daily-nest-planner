@@ -8,8 +8,8 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
   head: () => ({
     meta: [
-      { title: "Sign in — DailyNest" },
-      { name: "description", content: "Sign in to DailyNest to plan your day, gently." },
+      { title: "Sign in — DaySized" },
+      { name: "description", content: "Sign in to DaySized to plan your day, gently." },
     ],
   }),
 });
@@ -76,7 +76,7 @@ function AuthPage() {
               style={{ fontFamily: "var(--font-serif)" }}
               className="mt-5 text-4xl leading-tight text-foreground"
             >
-              Welcome to DailyNest
+              Welcome to DaySized
             </h1>
             <p className="mt-3 text-sm text-muted-foreground max-w-xs">
               Sign in to plan your day, gently.

@@ -16,7 +16,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 type PlanningMode = "school" | "weekend" | "custom";
-// Planning mode is no longer user-selectable; DailyNest uses the current day/time,
+// Planning mode is no longer user-selectable; DaySized uses the current day/time,
 // the available-until time, fixed commitments, and free-text input.
 
 interface Profile {
@@ -171,7 +171,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
         </header>
 
         <h1 className="text-3xl font-semibold text-foreground mb-1">Profile & Settings</h1>
-        <p className="text-sm text-muted-foreground mb-8">A calm space to shape how DailyNest plans your day.</p>
+        <p className="text-sm text-muted-foreground mb-8">A calm space to shape how DaySized plans your day.</p>
 
         {loading ? (
           <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -206,7 +206,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
             </Section>
 
             {/* Planning defaults */}
-            <Section title="Planning defaults" subtitle="Optional — DailyNest has calm defaults.">
+            <Section title="Planning defaults" subtitle="Optional — DaySized has calm defaults.">
               <Field label="Default “Available until”">
                 <div className="w-full sm:max-w-xs">
                   <WheelTimePicker
@@ -255,7 +255,7 @@ function SettingsPage({ user }: { user: { id: string; email: string; name: strin
               <div className="rounded-lg bg-secondary/40 p-4 flex items-start gap-3">
                 <Shield className="h-5 w-5 text-primary mt-0.5" />
                 <p className="text-sm text-foreground">
-                  Your personal tasks, worries, stress, and planning details are private by default. DailyNest will not share
+                  Your personal tasks, worries, stress, and planning details are private by default. DaySized will not share
                   them unless you choose to.
                 </p>
               </div>
@@ -540,7 +540,7 @@ function CommitmentsSection({
   return (
     <Section
       title="Weekly fixed commitments"
-      subtitle="Class, practice, work — DailyNest will schedule around these."
+      subtitle="Class, practice, work — DaySized will schedule around these."
     >
       <div
         className="mb-4 inline-flex rounded-lg border border-border bg-background p-1"

@@ -9,9 +9,9 @@
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
 
-# DailyNest Working Rules
+# DaySized Working Rules
 
-- This Lovable repository is the official DailyNest project.
+- This Lovable repository is the official DaySized project.
 - Preserve the current UI unless I explicitly request a design change.
 - Do not alter colors, typography, spacing, layout, navigation, or components during logic-only tasks.
 - Free-text task input must remain the primary and fastest input method.
