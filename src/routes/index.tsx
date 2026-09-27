@@ -9,10 +9,10 @@ export const Route = createFileRoute("/")({
   component: Landing,
   head: () => ({
     meta: [
-      { title: "DailyNest — A calm plan for real life" },
-      { name: "description", content: "DailyNest turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
-      { property: "og:title", content: "DailyNest — A calm plan for real life" },
-      { property: "og:description", content: "DailyNest turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
+      { title: "DaySized — A calm plan for real life" },
+      { name: "description", content: "DaySized turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
+      { property: "og:title", content: "DaySized — A calm plan for real life" },
+      { property: "og:description", content: "DaySized turns the mess in your head into a realistic, kind day plan. Slow down, think clearly, move forward gently." },
     ],
   }),
 });
@@ -78,7 +78,7 @@ function Landing() {
             <div className="w-9 h-9 rounded-full bg-primary/90 flex items-center justify-center">
               <Leaf className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span style={{ fontFamily: "var(--font-serif)" }} className="text-2xl">DailyNest</span>
+            <span style={{ fontFamily: "var(--font-serif)" }} className="text-2xl">DaySized</span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm text-foreground/70">
             <a href="#philosophy" className="hover:text-foreground transition">Philosophy</a>
@@ -139,7 +139,7 @@ function Landing() {
             data-reveal-delay="2"
             className="mt-8 max-w-md text-white/80 text-lg leading-relaxed"
           >
-            DailyNest helps you create a plan that&apos;s realistic, personal, and
+            DaySized helps you create a plan that&apos;s realistic, personal, and
             pressure-free — so you can focus on what truly matters.
           </p>
           <div data-reveal data-reveal-delay="3" className="mt-10 flex items-center gap-3 text-white/70">
@@ -193,7 +193,7 @@ function Landing() {
               <em>so you can live with intention.</em>
             </h2>
             <p data-reveal data-reveal-delay="2" className="mt-8 text-lg text-foreground/70 max-w-lg leading-relaxed">
-              DailyNest is more than a planner. It&apos;s a daily ritual that helps you
+              DaySized is more than a planner. It&apos;s a daily ritual that helps you
               slow down, think clearly, and move forward with calm.
             </p>
           </div>
@@ -205,7 +205,7 @@ function Landing() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-20">
             <p data-reveal className="text-xs tracking-[0.3em] uppercase text-foreground/60 mb-4">
-              Why DailyNest
+              Why DaySized
             </p>
             <h2
               data-reveal
@@ -304,7 +304,7 @@ function Landing() {
               A day, beautifully organized.
             </h2>
             <p data-reveal data-reveal-delay="2" className="mt-6 text-lg text-foreground/70 leading-relaxed max-w-md">
-              DailyNest brings structure to your day without the stress.
+              DaySized brings structure to your day without the stress.
             </p>
             <p data-reveal data-reveal-delay="2" className="mt-3 text-foreground/60 italic" style={{ fontFamily: "var(--font-serif)" }}>
               See your plan. Stay focused. Feel at ease.
@@ -354,7 +354,7 @@ function Landing() {
             <em>You need a plan that supports you.</em>
           </h2>
           <p data-reveal data-reveal-delay="1" className="mt-8 text-foreground/70 text-lg">
-            DailyNest is here for your real life.
+            DaySized is here for your real life.
           </p>
           <div data-reveal data-reveal-delay="2" className="mt-12 flex flex-col items-center gap-3">
             <Sprout className="w-5 h-5 text-primary" />
@@ -372,7 +372,7 @@ function Landing() {
       </section>
 
       <footer className="border-t border-border/60 py-8 text-center text-xs text-foreground/50">
-        © {new Date().getFullYear()} DailyNest — Made gently.
+        © {new Date().getFullYear()} DaySized — Made gently.
       </footer>
     </div>
   );

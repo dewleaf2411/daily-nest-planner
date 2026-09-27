@@ -52,7 +52,7 @@ function PlanRoute() {
     );
   }
 
-  return <DailyNest isGuest={!authed} />;
+  return <DaySized isGuest={!authed} />;
 }
 
 
@@ -174,7 +174,7 @@ interface BreakRoomFlow {
   shorterDurations: number[];
 }
 
-function DailyNest({ isGuest }: { isGuest: boolean }) {
+function DaySized({ isGuest }: { isGuest: boolean }) {
   const [raw, setRaw] = useState("");
 
   const [guestUsed, setGuestUsed] = useState(false);
@@ -2316,7 +2316,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                         onChange={(e) => setAddBreakForm({ ...addBreakForm, durationMinutes: parseInt(e.target.value, 10) || 5 })}
                         className="mt-1 w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                       />
-                      <p className="mt-1 text-xs text-muted-foreground">DailyNest will place it in the next workable spot.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">DaySized will place it in the next workable spot.</p>
                     </div>
                     <div className="flex justify-end gap-2 pt-1">
                       <button type="button" onClick={() => setAddMode(null)} className="inline-flex items-center rounded-md border border-border bg-background px-2.5 py-1 text-xs hover:bg-accent">Cancel</button>
@@ -2969,7 +2969,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
                   Make room for a {breakRoomFlow.item.durationMinutes}-minute break
                 </h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Your plan needs {formatDuration(breakRoomFlow.neededMinutes)} more. Choose one adjustment and DailyNest will place the break automatically.
+                  Your plan needs {formatDuration(breakRoomFlow.neededMinutes)} more. Choose one adjustment and DaySized will place the break automatically.
                 </p>
               </div>
               <button type="button" onClick={cancelPendingBreak} aria-label="Close and keep this break" className="rounded-md p-1 text-muted-foreground hover:bg-accent">
@@ -3250,7 +3250,7 @@ function DailyNest({ isGuest }: { isGuest: boolean }) {
               <div className="grid h-10 w-10 place-items-center rounded-full bg-secondary text-primary">
                 <Leaf className="h-5 w-5" strokeWidth={1.5} />
               </div>
-              <h3 className="font-serif text-2xl text-foreground leading-tight">Keep your DailyNest going</h3>
+              <h3 className="font-serif text-2xl text-foreground leading-tight">Keep your DaySized going</h3>
             </div>
             <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
               Sign in to create more plans and save your schedule, weekly commitments, and preferences.
